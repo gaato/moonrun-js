@@ -8,14 +8,17 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { nodeStdio } from '../src/hosts/node/stdio.ts';
 
-const runner = process.env['MOONRUN_JS_RECORD_RUNNER'] ?? 'moonrun';
+const nested = process.argv[2] === '--nested-moon';
+const runner = nested
+  ? (process.argv[3] ?? 'moon')
+  : (process.env['MOONRUN_JS_RECORD_RUNNER'] ?? 'moonrun');
 const dir = process.env['MOONRUN_JS_RECORD_DIR'];
 const root = process.env['MOONRUN_JS_RECORD_ROOT'] ?? process.cwd();
 // Each runner builds into its own target dir; both are shown as <build>.
 const build = process.env['MOONRUN_JS_RECORD_BUILD'];
 const scrub = (s: string): string =>
   (build === undefined ? s : s.split(build).join('<build>')).split(root).join('<root>');
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(nested ? 4 : 2);
 
 const result = spawnSync(runner, argv, { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: 1 << 30 });
 if (result.error !== undefined) {
@@ -29,7 +32,11 @@ const stdio = nodeStdio();
 stdio.writeStdout(stdout);
 stdio.writeStderr(stderr);
 
-if (dir !== undefined && argv.some((arg) => build !== undefined && arg.startsWith(`${build}/`))) {
+if (
+  !nested &&
+  dir !== undefined &&
+  argv.some((arg) => build !== undefined && arg.startsWith(`${build}/`))
+) {
   // Key by argv with the project root removed, so both runs produce the same keys.
   const normalized = argv.map(scrub);
   const key = createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 24);

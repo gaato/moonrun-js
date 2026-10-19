@@ -74,6 +74,48 @@ for (const runtime of ['node', 'deno', 'bun']) {
         check(runtime, code);
       });
 
+      it('compares nullable js-strings while retaining native GC-array builtins', () => {
+        const wat = `(module
+          (type $array (array (mut i16)))
+          (import "wasm:js-string" "equals" (func $eq (param externref externref) (result i32)))
+          (import "wasm:js-string" "fromCharCodeArray" (func $from (param (ref null $array) i32 i32) (result (ref extern))))
+          (export "eq" (func $eq))
+          (func (export "array") (result externref)
+            i32.const 65 i32.const 66 array.new_fixed $array 2 i32.const 0 i32.const 2 call $from))`;
+        const parsed = spawnSync('wasm-tools', ['parse', '-'], { input: wat });
+        expect(parsed.status).toBe(0);
+        const collision = spawnSync('wasm-tools', ['parse', '-'], {
+          input: wat.replace(
+            '(export "eq"',
+            '(import "host:js-string" "equals" (func (param externref externref) (result i32))) (export "eq"',
+          ),
+        });
+        expect(collision.status).toBe(0);
+        const engine = new URL('../../src/engine/js-string.ts', import.meta.url).href;
+        check(
+          runtime,
+          `
+          import assert from 'node:assert/strict';
+          import {compileStringModule,stringImports} from ${JSON.stringify(engine)};
+          const bytes=new Uint8Array(${JSON.stringify([...parsed.stdout])});
+          const saved=bytes.slice();
+          const module=compileStringModule(bytes,{builtins:['js-string']});
+          assert.deepEqual(bytes,saved);
+          const {eq,array}=new WebAssembly.Instance(module,stringImports(module)).exports;
+          assert.equal(eq('hello',null),0);assert.equal(eq(null,'hello'),0);
+          assert.equal(eq(null,null),1);assert.equal(eq('hello','hello'),1);assert.equal(eq('a','b'),0);
+          assert.equal(array(),'AB');
+          const privateBytes=bytes.slice();
+          const at=Buffer.from(privateBytes).indexOf('wasm:js-string');
+          privateBytes.set(new TextEncoder().encode('host:js-string'),at);
+          const external=new WebAssembly.Module(privateBytes,{builtins:['js-string']});
+          assert.equal(stringImports(external)['host:js-string'],undefined);
+          const collision=compileStringModule(new Uint8Array(${JSON.stringify([...collision.stdout])}),{builtins:['js-string']});
+          assert.equal(stringImports(collision)['host:js-string'],undefined);
+        `,
+        );
+      });
+
       it('delivers an accepted datagram even when the sender closes immediately', () => {
         const code = `
         import assert from 'node:assert/strict';

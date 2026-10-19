@@ -46,6 +46,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { jscStderr } from './comparison.ts';
 import { checkoutUpstream } from './upstream.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -374,10 +375,20 @@ interface Verdict {
   readonly cls: 'identical' | 'known' | 'pending' | 'mismatch';
   readonly fields: string[];
   readonly details: string[];
+  readonly rawFields?: readonly string[];
+  readonly normalizations?: readonly string[];
 }
 
-function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<string>): Verdict {
+function compare(
+  c: Case,
+  dir: string,
+  ref: Outcome,
+  js: Outcome,
+  pending: Set<string>,
+  runtime: string,
+): Verdict {
   const fields: string[] = [];
+  const rawFields: string[] = [];
   const details: string[] = [];
   // D5: the program names itself moonrun-js in usage and version texts.
   const programName = (s: string): string =>
@@ -385,8 +396,13 @@ function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<s
       ? s.replaceAll('Usage: moonrun-js ', 'Usage: moonrun ')
       : s;
   const text = (name: 'stdout' | 'stderr'): void => {
-    const a = normalize(ref, dir, ref[name]);
-    const b = programName(normalize(js, dir, js[name]));
+    const normal = (value: string): string =>
+      name === 'stderr' && runtime === 'bun' ? jscStderr(value) : value;
+    const rawA = normalize(ref, dir, ref[name]);
+    const rawB = programName(normalize(js, dir, js[name]));
+    if (rawA !== rawB) rawFields.push(name);
+    const a = normal(rawA);
+    const b = normal(rawB);
     if (a !== b) {
       fields.push(name);
       details.push(`${name}: ${firstDifference(a, b)}`);
@@ -395,10 +411,12 @@ function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<s
   text('stdout');
   text('stderr');
   if (ref.status !== js.status) {
+    rawFields.push('status');
     fields.push('status');
     details.push(`status: moonrun ${ref.status}, moonrun-js ${js.status}`);
   }
   if (ref.tree !== js.tree) {
+    rawFields.push('tree');
     fields.push('tree');
     details.push(`tree: ${firstDifference(ref.tree, js.tree)}`);
   }
@@ -414,7 +432,18 @@ function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<s
       cls = 'mismatch';
     }
   }
-  return { id: c.id, cls, fields, details };
+  return {
+    id: c.id,
+    cls,
+    fields,
+    details,
+    rawFields,
+    normalizations: [
+      'D1',
+      ...(runtime === 'bun' ? ['D3'] : []),
+      ...(c.divergences?.includes('D5') === true ? ['D5'] : []),
+    ],
+  };
 }
 
 // ---------------------------------------------------------------- main
@@ -500,7 +529,7 @@ async function main(): Promise<number> {
       const dir = path.join(scratch, c.id.replace(/[^A-Za-z0-9_.-]/g, '_'));
       const ref = await execute(reference, c, wasm, dir);
       const js = await execute(candidate, c, wasm, dir);
-      verdict = compare(c, dir, ref, js, pending);
+      verdict = compare(c, dir, ref, js, pending, runtime);
       if (verbose && verdict.cls === 'identical') {
         verdict.details.push(
           `${ref.status}, stdout ${ref.stdout.length}B, stderr ${ref.stderr.length}B; ${ref.elapsedMs}ms / ${js.elapsedMs}ms`,

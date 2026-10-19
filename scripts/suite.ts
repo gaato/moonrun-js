@@ -17,6 +17,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
+import { jscStderr, unorderedResults } from './comparison.ts';
 import { checkoutUpstream } from './upstream.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -94,12 +95,13 @@ function record(project: string, runner: string, out: string, build: string): vo
     ...packages.flatMap((p) => ['-p', p]),
   ];
   const started = Date.now();
-  const result = spawnSync('moon', args, {
+  const result = spawnSync(moon, args, {
     cwd: project,
     encoding: 'utf8',
     maxBuffer: 1 << 30,
     env: {
       ...process.env,
+      PATH: `${nestedBin}:${process.env['PATH'] ?? ''}`,
       MOONRUN_OVERRIDE: path.join(repoRoot, 'scripts/record-shim'),
       MOONRUN_JS_RECORD_RUNNER: runner,
       MOONRUN_JS_RECORD_DIR: out,
@@ -134,20 +136,30 @@ function firstDifference(a: string, b: string): string {
   return '';
 }
 
-/** Test-protocol blocks sorted, other output kept in order (for `--unordered`, D12). */
-function sortedResultBlocks(stdout: string): string {
-  const blocks: string[] = [];
-  const rest = stdout.replace(
-    /----- BEGIN MOON TEST RESULT -----\n[\s\S]*?\n----- END MOON TEST RESULT -----\n/g,
-    (block) => {
-      blocks.push(block);
-      return '';
-    },
-  );
-  return `${rest}\0${blocks.sort().join('')}`;
-}
-
 const project = checkout();
+const moon = execFileSync('which', ['moon'], { encoding: 'utf8' }).trim();
+const nestedBin = path.join(cache, 'suite-bin');
+mkdirSync(nestedBin, { recursive: true });
+const quote = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
+// Capture each nested moon's complete writes. Its parser emits a warning through
+// multiple writes; four parallel helper builds otherwise interleave mid-line.
+writeFileSync(
+  path.join(nestedBin, 'moon'),
+  `#!/bin/sh\nexec node ${quote(path.join(repoRoot, 'scripts/record-shim.ts'))} --nested-moon ${quote(moon)} "$@"\n`,
+  { mode: 0o755 },
+);
+if (suite === 'async') {
+  const programs = path.join(project, 'test_programs');
+  for (const entry of readdirSync(programs, { withFileTypes: true })) {
+    if (entry.isDirectory() && existsSync(path.join(programs, entry.name, 'moon.pkg'))) {
+      execFileSync(
+        moon,
+        ['build', `test_programs/${entry.name}`, '--debug', '--target-dir', '_build/test_programs'],
+        { cwd: project, stdio: 'pipe' },
+      );
+    }
+  }
+}
 const packageKey = packages.join('+').replaceAll('/', '_');
 // Long package lists would exceed the file-name limit; hash them.
 const packagePart =
@@ -175,14 +187,16 @@ for (const [k, r] of ref) {
     mismatches.push({ argv: r.argv, field: 'missing', detail: 'moonrun-js was not invoked' });
     continue;
   }
-  for (const field of ['exit', 'stdout', 'stderr'] as const) {
+  for (const field of ['exit', 'signal', 'stdout', 'stderr'] as const) {
     const same =
       field === 'stdout' && unordered
-        ? sortedResultBlocks(r.stdout) === sortedResultBlocks(j.stdout)
-        : r[field] === j[field];
+        ? unorderedResults(r.stdout) === unorderedResults(j.stdout)
+        : field === 'stderr' && runtime === 'bun'
+          ? jscStderr(r.stderr) === jscStderr(j.stderr)
+          : r[field] === j[field];
     if (!same) {
       const detail =
-        field === 'exit'
+        field === 'exit' || field === 'signal'
           ? `${r.exit} != ${j.exit}`
           : firstDifference(String(r[field]), String(j[field]));
       mismatches.push({ argv: r.argv, field, detail });
@@ -200,7 +214,18 @@ const reportPath = path.join(
   'reports',
   `${key}${runtime === 'node' ? '' : `.${runtime}`}.json`,
 );
-writeFileSync(reportPath, JSON.stringify({ invocations: ref.size, mismatches }, null, 2));
+writeFileSync(
+  reportPath,
+  JSON.stringify(
+    {
+      invocations: ref.size,
+      normalizations: [...(unordered ? ['D12'] : []), ...(runtime === 'bun' ? ['D3'] : [])],
+      mismatches,
+    },
+    null,
+    2,
+  ),
+);
 const bad = new Set(mismatches.map((m) => JSON.stringify(m.argv))).size;
 console.log(
   `${key}: ${ref.size - bad}/${ref.size} invocations identical; report ${path.relative(repoRoot, reportPath)}`,

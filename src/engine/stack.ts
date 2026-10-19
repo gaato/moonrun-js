@@ -1,5 +1,6 @@
 import type { DiagnosticLine } from '../diagnostics/diag.ts';
 import { guestFrame } from '../diagnostics/stack.ts';
+import { wasmFunctions } from './wasm-sections.ts';
 
 const HEX = /^[0-9a-fA-F]+$/;
 
@@ -11,82 +12,8 @@ const functionBodies = new WeakMap<
 >();
 
 export function rememberFunctionBodies(module: WebAssembly.Module, bytes: Uint8Array): void {
-  let pos = 8;
-  const uint = (): number => {
-    let value = 0;
-    let shift = 0;
-    for (;;) {
-      const byte = bytes[pos++];
-      if (byte === undefined) throw new Error('truncated wasm section');
-      value += (byte & 127) * 2 ** shift;
-      if ((byte & 128) === 0) return value;
-      shift += 7;
-    }
-  };
-  // Module.imports omits native js-string builtins, but they still consume indices.
-  let imported = 0;
-  const name = (): void => {
-    const length = uint();
-    pos += length;
-  };
-  const valueType = (): void => {
-    const type = bytes[pos++];
-    if (type === 0x63 || type === 0x64) uint();
-  };
-  const limits = (): void => {
-    const flags = uint();
-    uint();
-    if ((flags & 1) !== 0) uint();
-    if ((flags & 8) !== 0) uint();
-  };
-  while (pos < bytes.length) {
-    const section = bytes[pos++];
-    const length = uint();
-    const end = pos + length;
-    if (section === 2) {
-      const count = uint();
-      for (let i = 0; i < count; i++) {
-        name();
-        name();
-        switch (bytes[pos++]) {
-          case 0:
-            uint();
-            imported++;
-            break;
-          case 1:
-            valueType();
-            limits();
-            break;
-          case 2:
-            limits();
-            break;
-          case 3:
-            valueType();
-            pos++;
-            break;
-          case 4:
-            pos++;
-            uint();
-            break;
-          // A future import encoding: leave anonymous frames as the engine gave them.
-          default:
-            return;
-        }
-      }
-    }
-    if (section === 10) {
-      const count = uint();
-      const bodies = [];
-      for (let i = 0; i < count; i++) {
-        const size = uint();
-        bodies.push({ start: pos, end: pos + size, index: imported + i });
-        pos += size;
-      }
-      functionBodies.set(module, bodies);
-      return;
-    }
-    pos = end;
-  }
+  const layout = wasmFunctions(bytes);
+  if (layout !== undefined) functionBodies.set(module, layout.bodies);
 }
 
 /** Port of moonrun `parse_stack_line` for V8-style stacks. */
