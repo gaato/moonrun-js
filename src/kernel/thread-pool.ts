@@ -145,7 +145,7 @@ export class ThreadPool {
   }
 
   /** `run_job`: runs a Job on the guest's own thread. */
-  runJob(handle: Handle): Result<void, AsyncError> {
+  runJob(handle: Handle, done?: () => void): Result<void, AsyncError> {
     const job = this.#take(handle);
     if (!job.ok) {
       return job;
@@ -153,6 +153,7 @@ export class ThreadPool {
     startJob(job.value, this.#env, () => {
       this.#settle(job.value.payload);
       this.#restore(handle, job.value);
+      done?.();
     });
     return ok(undefined);
   }

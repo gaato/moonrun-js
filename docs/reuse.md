@@ -11,7 +11,7 @@
 | moonutil `demangle.rs`、`source_map.rs`、`wasm_diagnostic.rs`、`memory_sanitizer.rs` | 流用する | 完全にそのままビルドできる。TS 版と差ゼロ | `src/diagnostics/*`、`src/abi/legacy/sanitizer.ts` の大半 |
 | `main.rs` の clap 定義（`struct Commandline`） | 流用する | エラーとヘルプが本家と一致。プログラム名と版は実行時に注入（D5） | `src/hosts/node/args.ts` |
 | `filesystem/job/stat.rs`（stat 結果の配置） | TS のまま | stat ごとに呼ばれる 65 行で、上流の変更も少ない。流用版 wasm との一致を CI のテストで確かめる | — |
-| `sqlite/policy.rs` | 流用する（P5、ポリシー crate に追加） | 純粋なロジック | — |
+| `sqlite/policy.rs` | 流用済み（P5、ポリシー crate に追加） | 純粋なロジック | — |
 | `wasi/mod.rs`、`async_api/*` | 流用しない | ゲストのメモリ全体を `&mut [u8]` で受け取る作りで、別インスタンスからは呼び出しごとの全コピーが要る | — |
 | `async_host/**`、`async_sys/**`、`process/**`、`network/**`、`sqlite/*`（libsqlite3）、`runtime/{mod,stdio,executable}.rs`、`engine.rs`、`v8/**`、`wasmtime/**` | 流用しない | OS（libc・スレッド・OpenSSL・fd）かエンジンに依存 | — |
 
@@ -40,3 +40,5 @@
 - 上の 3 点: (1) `filesystem/job/mod.rs` のスタブが `Job` の名前で非公開の検査を橋渡しする（`Job::check_policy` の対応表は手で上流に合わせる）。(2) `write_bytes_to_file*` は「バイト列でない」を境界で渡し、拒否が先に勝つ。(3) 受け入れた。legacy fs を使う実行は初回呼び出しで約 1ms の compile を払う。
 - `main.rs` は丸ごと取り出し、`crates/moonrun-cli/build.rs` が `struct Commandline` だけを切り出す。
 - `process/mod.rs` の `ChildAuthority` は OS 依存のファイルにあるので TS（`src/domains/policy/child-authority.ts`）のまま。
+
+- P5: `sqlite/policy.rs` の admission / open flags / SQL authorizer を `moonrun-policy` に流用。SQLite 本体は libsqlite3-sys 0.38.2 の SHA-256 検証済み amalgamation（3.53.2）から `scripts/build-sqlite.ts` でビルドし、`src/domains/sqlite/sqlite-engine.wasm` を配布する。ホスト側 VFS と同一 Run 内ロックを TS、上流と同じハンドル寿命・mutex・ジョブ結果を SQLite domain が持つ。

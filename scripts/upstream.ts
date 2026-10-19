@@ -14,7 +14,12 @@ export type UpstreamName = 'moon' | 'async';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
 const git = (args: readonly string[], cwd = repoRoot): string =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 28 });
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 1 << 28,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
 /** The submodule's directory. */
 export function upstreamDir(name: UpstreamName): string {

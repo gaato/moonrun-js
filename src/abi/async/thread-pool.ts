@@ -32,7 +32,10 @@ export function threadPool(env: AsyncEnv) {
       return error === undefined ? 0 : errnoOf(error);
     },
     'thread_pool/free_job': (job) => unwrap(pool.freeJob(handle(job))),
-    'thread_pool/run_job': (job) => unwrap(pool.runJob(handle(job))),
+    'thread_pool/run_job': {
+      suspends: true,
+      impl: (job) => new Promise<void>((resolve) => unwrap(pool.runJob(handle(job), resolve))),
+    },
     'thread_pool/spawn_worker': (completionId, job) =>
       unwrap(kernel.spawnWorker(completionId, handle(job))),
     'thread_pool/spawn_worker_with_pipe': (completionId, job, writer) =>

@@ -204,7 +204,7 @@ describe('thread pool', () => {
     expect(kernel.cancelWorkerWithRetry(worker)).toEqual({ ok: false, error: { kind: 'inval' } });
   });
 
-  it('runs stdio stream Jobs against the stdio port', () => {
+  it('runs stdio stream Jobs against the stdio port', async () => {
     const { kernel, stdio, source } = setup(new Uint8Array([65, 66]));
     const out = kernel.resources.stdioHandle(1);
     const write = value(
@@ -227,8 +227,41 @@ describe('thread pool', () => {
       })),
     );
     value(kernel.spawnWorker(2, read));
+    expect(kernel.pool.job(read).ok).toBe(false);
+    await flush();
     expect(value(kernel.pool.job(read)).ret).toBe(2);
     expect(value(kernel.fetchCompletion(source, 4))).toEqual([1, 2]);
+  });
+
+  it('keeps the Run responsive while an async stdin read is blocked', async () => {
+    const { kernel, scheduler, stdio, source } = setup();
+    let supply: ((n: number) => void) | undefined;
+    stdio.readStdinAsync = (buffer) =>
+      new Promise((resolve) => {
+        buffer[0] = 65;
+        supply = resolve;
+      });
+    const read = value(
+      kernel.insertResourceJob(kernel.resources.stdioHandle(0), (resource) => ({
+        kind: 'stream-read',
+        resource,
+        len: 1,
+        position: -1n,
+        result: undefined,
+      })),
+    );
+    const reader = value(kernel.spawnWorker(1, read));
+    const sleep = kernel.pool.insertJob({ kind: 'sleep', ms: 10 });
+    value(kernel.spawnWorker(2, sleep));
+    scheduler.advance(10);
+    expect(value(kernel.fetchCompletion(source, 4))).toEqual([2]);
+    expect(kernel.pool.job(read).ok).toBe(false);
+    expect(value(kernel.cancelWorkerWithRetry(reader))).toBe('need-wait');
+    supply?.(1);
+    await flush();
+    expect(value(kernel.pool.job(read)).ret).toBe(1);
+    expect(value(kernel.fetchCompletion(source, 4))).toEqual([1]);
+    kernel.teardown();
   });
 
   it('tears down timers, polls and resources', async () => {

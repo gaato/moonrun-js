@@ -6,6 +6,8 @@ import type { HostError, Result } from './result.ts';
  * once per process and return the same `WebAssembly.Module`.
  */
 export interface ComponentsPort {
+  /** SQLite 3.53.2 with its synchronous host VFS, built from the checked amalgamation. */
+  sqliteEngine(): Result<WebAssembly.Module, HostError>;
   /** moonrun-policy.wasm: sandbox policy, run environment, Host Filesystem. */
   policy(): Result<WebAssembly.Module, HostError>;
   /** tls-engine.wasm (crates/tls-engine, rustls): compiled on the first TLS configuration of a run. */

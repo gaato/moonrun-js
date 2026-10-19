@@ -28,6 +28,8 @@ export function nodeComponentModule(url: URL): Result<WebAssembly.Module, HostEr
 
 export function nodeComponents(): ComponentsPort {
   return {
+    sqliteEngine: () =>
+      nodeComponentModule(new URL('../../domains/sqlite/sqlite-engine.wasm', import.meta.url)),
     policy: () => nodeComponentModule(POLICY_URL),
     tlsEngine: () => nodeComponentModule(TLS_ENGINE_URL),
   };

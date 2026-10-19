@@ -207,7 +207,7 @@ async function prepareAmalgamation(): Promise<string> {
 function compile(source: string, flags: readonly string[], name: string): string {
   const key = sha256(
     new TextEncoder().encode(
-      `${sha256(readFileSync(source))}\n${flags.join(' ')}\n${execFileSync('clang', ['--version'], { encoding: 'utf8' })}`,
+      `${sha256(readFileSync(source))}\n${flags.join(' ')}\n${execFileSync('clang', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })}`,
     ),
   ).slice(0, 16);
   const object = path.join(cacheDir, `${name}-${key}.o`);
@@ -288,7 +288,7 @@ if (check) {
       ? 'committed wasm is byte-identical'
       : `committed wasm differs in bytes (${kib(committed.length)}); import/export surface ${sameSurface ? 'matches' : 'DIFFERS'}`,
   );
-  if (!sameSurface) {
+  if (!same || !sameSurface) {
     process.exit(1);
   }
 }

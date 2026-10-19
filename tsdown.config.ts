@@ -14,6 +14,7 @@ export default defineConfig({
   deps: { neverBundle: [/^node:/] },
   // The prebuilt wasm components, next to the modules that name them by URL.
   copy: [
+    { from: 'src/domains/sqlite/sqlite-engine.wasm', to: 'dist/domains/sqlite' },
     { from: 'src/domains/tls/tls-engine.wasm', to: 'dist/domains/tls' },
     { from: 'src/domains/policy/moonrun-policy.wasm', to: 'dist/domains/policy' },
     { from: 'src/diagnostics/moonrun-diag.wasm', to: 'dist/diagnostics' },

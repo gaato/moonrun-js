@@ -302,6 +302,27 @@ export class PolicyComponent {
     return hostError(this.#abi.call('policy_authorize_write', path));
   }
 
+  /** Admission and SQL authorization are upstream sqlite/policy.rs in the component. */
+  sqliteAdmit(filename: Uint8Array, flags: number, vfs: bigint): number {
+    return this.#abi.call(
+      'policy_sqlite_admit',
+      filename,
+      flags,
+      Number(vfs & 0xffffffffn),
+      Number(vfs >> 32n),
+    );
+  }
+
+  sqliteAuthorize(
+    action: number,
+    a1: Uint8Array | undefined,
+    a2: Uint8Array | undefined,
+    db: Uint8Array | undefined,
+    trigger: Uint8Array | undefined,
+  ): number {
+    return this.#abi.call('policy_sqlite_authorize', action, a1, a2, db, trigger);
+  }
+
   // ----- network and process -----
 
   /** Whether moonrun would check sockets and DNS (a policy is in force). */

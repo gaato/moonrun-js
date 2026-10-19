@@ -60,7 +60,7 @@ function lookup(program: string, cwd: string | undefined): Result<string, HostEr
       const code = codeOf(e);
       if (code === 'EACCES') {
         eacces = true;
-      } else if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'ELOOP') {
+      } else if (!['ENOENT', 'ENOTDIR', 'ESTALE', 'ENODEV', 'ETIMEDOUT'].includes(code)) {
         return err({ code });
       }
       continue;
@@ -96,20 +96,25 @@ async function socketPair(): Promise<Result<{ child: Socket; parent: Socket }, H
       ? `\0moonrun-js-${process.pid}-${randomBytes(8).toString('hex')}`
       : path.join(tmpdir(), `moonrun-js-${process.pid}-${randomBytes(8).toString('hex')}.sock`);
   const server = createServer();
+  let child: Socket | undefined;
+  let parent: Socket | undefined;
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
       server.listen({ path: address }, resolve);
     });
     const accepted = new Promise<Socket>((resolve) => server.once('connection', resolve));
-    const child = connect({ path: address });
+    const connecting = connect({ path: address });
+    child = connecting;
     await new Promise<void>((resolve, reject) => {
-      child.once('error', reject);
-      child.once('connect', resolve);
+      connecting.once('error', reject);
+      connecting.once('connect', resolve);
     });
-    const parent = await accepted;
+    parent = await accepted;
     return ok({ child, parent });
   } catch (e) {
+    child?.destroy();
+    parent?.destroy();
     return err({ code: codeOf(e) });
   } finally {
     server.close();

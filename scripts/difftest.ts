@@ -358,7 +358,7 @@ function normalize(o: Outcome, dir: string, b: Buffer): string {
     .toString('latin1')
     .replaceAll(dir, '<cwd>')
     .replace(/wasm:\/\/wasm\/[0-9a-f]+/g, 'wasm://wasm/<D1>')
-    .replace(new RegExp(`(?<![0-9])${o.pid}(?![0-9])`, 'g'), '<pid>');
+    .replace(new RegExp(`(?<![0-9:])${o.pid}(?![0-9:])`, 'g'), '<pid>');
 }
 
 function firstDifference(a: string, b: string): string {

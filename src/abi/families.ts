@@ -10,10 +10,12 @@ import { rand } from './legacy/rand.ts';
 import { MEMORY_SANITIZER_MODULE, memorySanitizer } from './legacy/sanitizer.ts';
 import { sys } from './legacy/sys.ts';
 import { time } from './legacy/time.ts';
+import { sqlite } from './sqlite/index.ts';
 import { preview1 } from './wasi/preview1.ts';
 
 /** Every wasm import module moonrun provides, keyed by module name. */
 export const FAMILIES: Readonly<Record<string, ImportFamily>> = {
+  'moonbitlang/sqlite': sqlite,
   spectest,
   moonbit,
   console: consoleLog,

@@ -601,6 +601,7 @@ describe('KernelNetwork', () => {
     }
     expect(kernel.network.ifNameToIndex('eth0')).toEqual({ ok: true, value: 2 });
     expect(kernel.network.ifNameToIndex('nope')).toEqual(errno('ENODEV'));
+    expect(kernel.network.ifIndexToName(0)).toEqual(errno('ENXIO'));
     expect(kernel.network.ifIndexToName(9)).toEqual(errno('ENXIO'));
     expect(kernel.network.ipv6TestInterface()).toBe(2);
   });

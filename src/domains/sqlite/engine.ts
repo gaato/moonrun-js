@@ -132,7 +132,8 @@ export class SqliteEngine {
       return exports.memory.buffer;
     };
     this.vfs = new Vfs(deps, memory);
-    const text = (ptr: number): Uint8Array | undefined => (ptr === 0 ? undefined : this.cstring(ptr));
+    const text = (ptr: number): Uint8Array | undefined =>
+      ptr === 0 ? undefined : this.cstring(ptr);
     const instance = new WebAssembly.Instance(module, {
       host: this.vfs.imports({
         authorize: (action, a1, a2, db, trigger) =>
@@ -147,9 +148,9 @@ export class SqliteEngine {
     }
     exports = instance.exports as unknown as EngineExports;
     this.x = exports;
-    this.stepAsync = WebAssembly.promising(
-      exports.sqlite3_step as (stmt: number) => number,
-    ) as (stmt: EnginePtr) => Promise<number>;
+    this.stepAsync = WebAssembly.promising(exports.sqlite3_step as (stmt: number) => number) as (
+      stmt: EnginePtr,
+    ) => Promise<number>;
   }
 
   /** A fresh view of `len` bytes of engine memory at `ptr`. */

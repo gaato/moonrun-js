@@ -44,7 +44,6 @@
     {
       "id": "skills/web-fetch-example",
       "area": "network-live",
-      "requires": ["signals"],
       "note": "starts the legacy sigwait Job (thread_pool/make_sigwait_job) before fetching",
       "wasm": "web-fetch",
       "argv": ["<wasm>", "--", "https://example.com"],

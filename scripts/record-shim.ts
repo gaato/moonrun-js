@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
+import { nodeStdio } from '../src/hosts/node/stdio.ts';
 
 const runner = process.env['MOONRUN_JS_RECORD_RUNNER'] ?? 'moonrun';
 const dir = process.env['MOONRUN_JS_RECORD_DIR'];
@@ -22,8 +23,11 @@ if (result.error !== undefined) {
   process.exit(127);
 }
 const { stdout, stderr } = result;
-process.stdout.write(stdout);
-process.stderr.write(stderr);
+// Child runners may themselves be connected to a guest pipe. Write the complete
+// capture through raw fds before their parent observes our exit.
+const stdio = nodeStdio();
+stdio.writeStdout(stdout);
+stdio.writeStderr(stderr);
 
 if (dir !== undefined && argv[0] !== '--version') {
   // Key by argv with the project root removed, so both runs produce the same keys.

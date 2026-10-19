@@ -57,7 +57,7 @@ Other filesystem consumers:
   private key, then the certificate; on denial the TLS handle gets `failed to access TLS private
   key file: PermissionDenied` / `... certificate file: PermissionDenied` before the backend loads
   the file (`TlsDomainDeps.authorizeRead`).
-* SQLite open (`sqlite/policy.rs`, to be added to the component): unless `:memory:`, read checks
+* SQLite open (`sqlite/policy.rs`, included in the component): unless `:memory:`, read checks
   on the database and its parent, a write check on the parent for READWRITE|CREATE; any denial is
   `SQLITE_CANTOPEN`.
 

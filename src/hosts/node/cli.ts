@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeSync } from 'node:fs';
 import * as path from 'node:path';
 import { osCapabilities } from '../../abi/os-capabilities.ts';
 import { PolicyComponent } from '../../domains/policy/component.ts';
@@ -36,7 +36,7 @@ function indent(text: string, first: string, rest: string = first): string {
 }
 
 function fail(chain: readonly string[]): never {
-  process.stderr.write(`${formatErrorChain(chain)}\n`);
+  writeSync(2, `${formatErrorChain(chain)}\n`);
   process.exit(1);
 }
 
@@ -97,7 +97,7 @@ async function main(argv: readonly string[]): Promise<number> {
     },
   });
   if (command.kind === 'exit') {
-    (command.code === 0 ? process.stdout : process.stderr).write(command.message);
+    writeSync(command.code === 0 ? 1 : 2, command.message);
     return command.code;
   }
   const rawPath = Buffer.from(command.path);

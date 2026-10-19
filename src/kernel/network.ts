@@ -348,6 +348,8 @@ export class KernelNetwork {
 
   /** `if_indextoname`: the NUL-terminated name, `ENXIO` for an unknown index. */
   ifIndexToName(index: number): Result<Handle, AsyncError> {
+    // Linux interface indices start at 1; reject zero without asking the host.
+    if (index === 0) return err(native('ENXIO'));
     const found = this.#options.net.interfaces().find((i) => i.index === index);
     if (found === undefined) {
       return err(native('ENXIO'));

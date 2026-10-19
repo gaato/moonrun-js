@@ -20,7 +20,7 @@ MoonBit の `moonrun`（toolchain 同梱の wasm ランナー、Rust + V8）を 
 4. **仮想カーネルは JS が持つ**: WASI も `node:wasi` を使わず自前、ハンドル・poller・スレッドプール・パイプは TS の状態機械。
 5. **TLS は rustls を wasm にしたもの**をホスト内の第 2 インスタンスとして同期で駆動（§TLS）。
 6. **async / sqlite の import 表は moonrun の `declare_async_imports!` / `declare_sqlite_imports!` からコード生成**し、上流追従もこれで行う。
-7. 1 パッケージ（npm 名 `moonrun-js`、bin も `moonrun-js`。`moonrun` とは名乗らない）+ 同一 repo 内の Rust crate（TLS）。**TS 以外の部品は「npm で自然に配布でき、動くホストを狭めないもの」に限る**: TLS エンジンはビルド済み `tls-engine.wasm`（WASI も wasm-bindgen も無し、Wasm GC すら不要）を npm パッケージに同梱し、利用者に Rust は要らない（必要なのは repo からビルドする開発者だけ）。SQLite は公式 npm の `@sqlite.org/sqlite-wasm`。ネイティブアドオン（`.node`）は動くホストを狭めるので使わない。部品の wasm も `WebAssembly.Module` で差し込めるオプションを用意する（ゲストの `Engine.load(Module)` と同じ汎用 API）。
+7. 1 パッケージ（npm 名 `moonrun-js`、bin も `moonrun-js`。`moonrun` とは名乗らない）+ 同一 repo 内の Rust crate（TLS）。**TS 以外の部品は「npm で自然に配布でき、動くホストを狭めないもの」に限る**: TLS エンジンはビルド済み `tls-engine.wasm`（WASI も wasm-bindgen も無し、Wasm GC すら不要）を npm パッケージに同梱し、利用者に Rust は要らない（必要なのは repo からビルドする開発者だけ）。SQLite は S8 の結果に従い、同じ版・設定の SQLite 3.53.2 を自前ビルドした `sqlite-engine.wasm`。ネイティブアドオン（`.node`）は動くホストを狭めるので使わない。部品の wasm も `WebAssembly.Module` で差し込めるオプションを用意する（ゲストの `Engine.load(Module)` と同じ汎用 API）。
 
 ## アーキテクチャ
 
@@ -100,7 +100,7 @@ moonrun の Rust ソースのうち OS に触らない論理部分（ポリシ�
 - **プロセス**: `child_process.spawn`、stdio は ignore/fd/inherit/pipe 中継（背圧あり）、wait は Linux wait status にエンコード。
 - **シグナル**: ゲストが登録した間だけ `process.on(SIG*)`、ビットマスクで合流、CompletionSource で job より先に排出。
 - **終了**: 最初の exit が勝つ TerminationCell。promising 内では exit import が永久 pending の Promise を返してゲストを凍結し、runner は `race([export, terminated])`。start 関数中は sentinel を throw。各呼び出し後に例外分類より先にセルを確認。teardown で worker abort・ソケット破棄・stdio flush。
-- **stdio**: Node では `fs.writeSync(1|2)` / `fs.readSync(0)` + EAGAIN リトライ（`process.stdout/stdin` は触らない）。async ゲストの stdin は read ジョブ（キャンセル不可=0）。
+- **stdio**: Node では `fs.writeSync(1|2)` / `fs.readSync(0)` + EAGAIN リトライ（`process.stdout/stdin` は触らない）。async ゲストの stdin は非同期 read ジョブ（読み取り中はキャンセル不可、EAGAIN の再試行待ちは中断可能）。
 
 ## TLS
 

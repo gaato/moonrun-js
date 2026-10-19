@@ -83,6 +83,7 @@ describe('moonbitlang/async handler map', () => {
       'socket/listen',
       'socket/sendto/unix',
       'socket/udp_client_connect',
+      'thread_pool/run_job',
     ]);
   });
 
@@ -96,9 +97,8 @@ describe('moonbitlang/async handler map', () => {
       'fd_util/get_atime_sec failed: Fault',
     );
     expect(() => call('event_bus/event_fd', 0n)).toThrow('event_bus/event_fd failed: Badf');
-    expect(() => call('process/kill', 1)).toThrow(
-      'moonbitlang/async.process/kill is not implemented yet',
-    );
+    // kill ignores native errors, like moonrun (the fake host has no process port).
+    expect(call('process/kill', 0x7fffffff)).toBeUndefined();
     expect(() => call('event_bus/event_pid', 0n)).toThrow(
       'platform-inactive moonbitlang/async import `event_bus/event_pid` was called',
     );
