@@ -356,9 +356,12 @@ interface Verdict {
 function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<string>): Verdict {
   const fields: string[] = [];
   const details: string[] = [];
+  // D5: the program names itself moonrun-js in usage and version texts.
+  const programName = (s: string): string =>
+    (c.divergences ?? []).includes('D5') ? s.replaceAll('Usage: moonrun-js ', 'Usage: moonrun ') : s;
   const text = (name: 'stdout' | 'stderr'): void => {
     const a = normalize(ref, dir, ref[name]);
-    const b = normalize(js, dir, js[name]);
+    const b = programName(normalize(js, dir, js[name]));
     if (a !== b) {
       fields.push(name);
       details.push(`${name}: ${firstDifference(a, b)}`);
@@ -376,7 +379,9 @@ function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<s
   }
   let cls: Verdict['cls'] = 'identical';
   if (fields.length > 0) {
-    if ((c.divergences ?? []).length > 0) {
+    if ((c.divergences ?? []).some((d) => d !== 'D5')) {
+      cls = 'known';
+    } else if (c.divergences?.includes('D5') === true && c.area === 'cli-identity') {
       cls = 'known';
     } else if (c.area !== undefined && pending.has(c.area)) {
       cls = 'pending';

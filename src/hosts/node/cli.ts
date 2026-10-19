@@ -2,90 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { compileBytes } from '../../engine/load.ts';
 import { type RunOutcome, run, type TestArgs } from '../../engine/run.ts';
+import { type Parsed, PROGRAM, parseArgs, UsageError } from './args.ts';
 import { nodeHost } from './index.ts';
 
 export const VERSION = '0.0.0';
 const COMPAT = 'compat moonrun 0.1.20261012 748b63c';
-
-interface Command {
-  readonly path: string;
-  /** Index of the path in argv, to recover its raw bytes. */
-  readonly pathIndex: number;
-  readonly args: string[];
-  readonly noStackTrace: boolean;
-  readonly testArgs: string | undefined;
-  readonly stackSize: number | undefined;
-  readonly policy: string | undefined;
-  readonly policySourceDir: string | undefined;
-}
-
-class UsageError extends Error {}
-
-const VALUE_FLAGS = new Set(['--test-args', '--stack-size', '--policy', '--policy-source-dir']);
-
-/** Mirrors moonrun's clap definition: flags may appear before `--`, args allow hyphen values. */
-function parse(argv: readonly string[]): Command | 'version' | 'help' {
-  let filePath: string | undefined;
-  let pathIndex = -1;
-  const args: string[] = [];
-  const values = new Map<string, string>();
-  let noStackTrace = false;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i] ?? '';
-    if (a === '--') {
-      args.push(...argv.slice(i + 1));
-      break;
-    }
-    if (a === '--version' || a === '-V') {
-      return 'version';
-    }
-    if (a === '--help' || a === '-h') {
-      return 'help';
-    }
-    if (a === '--no-stack-trace') {
-      noStackTrace = true;
-      continue;
-    }
-    const eq = a.indexOf('=');
-    const flag = eq > 0 ? a.slice(0, eq) : a;
-    if (VALUE_FLAGS.has(flag)) {
-      const v = eq > 0 ? a.slice(eq + 1) : argv[++i];
-      if (v === undefined) {
-        throw new UsageError(
-          `a value is required for '${flag} <${flag.slice(2).toUpperCase()}>' but none was supplied`,
-        );
-      }
-      values.set(flag, v);
-      continue;
-    }
-    if (filePath === undefined) {
-      if (a.startsWith('-') && a !== '-') {
-        throw new UsageError(`unexpected argument '${a}' found`);
-      }
-      filePath = a;
-      pathIndex = i;
-    } else {
-      args.push(a);
-    }
-  }
-  if (filePath === undefined) {
-    throw new UsageError('the following required arguments were not provided:\n  <PATH>');
-  }
-  const stackSize = values.get('--stack-size');
-  if (values.has('--policy-source-dir') && !values.has('--policy')) {
-    throw new UsageError('the following required arguments were not provided:\n  --policy <PATH>');
-  }
-  return {
-    path: filePath,
-    pathIndex,
-    args,
-    noStackTrace,
-    testArgs: values.get('--test-args'),
-    stackSize: stackSize === undefined ? undefined : Number.parseInt(stackSize, 10),
-    policy: values.get('--policy'),
-    policySourceDir: values.get('--policy-source-dir'),
-  };
-}
 
 /** anyhow's `{:?}` rendering of an error chain, as printed by moonrun's `main`. */
 export function formatErrorChain(chain: readonly string[]): string {
@@ -156,24 +77,22 @@ function rustAbsolute(raw: Buffer): Uint8Array {
 }
 
 async function main(argv: readonly string[]): Promise<number> {
-  let command: ReturnType<typeof parse>;
+  let command: Parsed;
   try {
-    command = parse(argv);
+    command = parseArgs(argv);
   } catch (e) {
     if (e instanceof UsageError) {
-      process.stderr.write(
-        `error: ${e.message}\n\nUsage: moonrun-js [OPTIONS] <PATH> [ARGS]...\n\nFor more information, try '--help'.\n`,
-      );
+      process.stderr.write(e.message);
       return 2;
     }
     throw e;
   }
-  if (command === 'version') {
-    process.stdout.write(`moonrun-js ${VERSION} (${COMPAT})\n`);
+  if (command.kind === 'version') {
+    process.stdout.write(`${PROGRAM} ${VERSION} (${COMPAT})\n`);
     return 0;
   }
-  if (command === 'help') {
-    process.stdout.write('Usage: moonrun-js [OPTIONS] <PATH> [ARGS]...\n');
+  if (command.kind === 'help') {
+    process.stdout.write(`Usage: ${PROGRAM} [OPTIONS] <PATH> [ARGS]...\n`);
     return 0;
   }
   const rawPath = rawArgs(argv.length)?.[command.pathIndex] ?? Buffer.from(command.path);

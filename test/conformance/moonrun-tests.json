@@ -286,7 +286,7 @@
   "cases": [
     {
       "id": "cli/version",
-      "area": "cli",
+      "area": "cli-identity",
       "source": "test.rs:test_moonrun_version",
       "wasm": "cli_args",
       "argv": ["--version"],
@@ -294,7 +294,7 @@
     },
     {
       "id": "cli/help",
-      "area": "cli",
+      "area": "cli-identity",
       "source": "test.rs:test_moonrun_help_describes_policy_shape",
       "wasm": "cli_args",
       "argv": ["--help"],

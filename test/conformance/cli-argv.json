@@ -1,0 +1,167 @@
+{
+  "wasms": {
+    "cli_args": {
+      "moon": {
+        "project": "test_cli_args",
+        "artifact": "_build/wasm-gc/debug/build/main/main.wasm",
+        "target": "wasm-gc"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "argv/flag-after-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--no-stack-trace", "a", "b"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/flag-between-args",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "a", "--no-stack-trace", "b"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/hyphen-arg-after-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "-x", "foo"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/unknown-long-after-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--foo", "bar"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/unknown-long-before-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["--foo", "<wasm>"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/flag-before-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["--no-stack-trace", "<wasm>", "a"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/double-separator",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--", "--", "a"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/flag-after-separator",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--", "--no-stack-trace"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/repeated-flag",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--no-stack-trace", "--no-stack-trace"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/missing-value",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--test-args"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/equals-value",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--policy-source-dir=x"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/no-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": [],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/dash-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["-"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/empty-arg",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "", "x"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/single-dash-arg",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "-"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/separator-before-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["--", "<wasm>", "a"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/stack-size-invalid",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--stack-size", "abc"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/stack-size-empty",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--stack-size="],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/stack-size-missing",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--stack-size"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/repeated-value-option",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["--test-args", "{}", "--test-args", "{}", "<wasm>"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/value-looks-like-flag",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["<wasm>", "--policy", "--no-stack-trace"],
+      "divergences": ["D5"]
+    },
+    {
+      "id": "argv/short-unknown-before-path",
+      "area": "cli",
+      "wasm": "cli_args",
+      "argv": ["-x", "<wasm>"],
+      "divergences": ["D5"]
+    }
+  ]
+}
