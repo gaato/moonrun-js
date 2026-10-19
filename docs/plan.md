@@ -46,6 +46,10 @@ crates/tls-engine/   scripts/{gen-imports,check-async-surface,build-tls,difftest
 test/{unit,wat,fixtures/mbt,conformance}   bin/{moonrun-js, moonrun-js-deno, moonrun-js-bun}
 ```
 
+## 流用の原則（2026-10-19 追加）
+
+moonrun の Rust ソースのうち OS に触らない論理部分（ポリシー、WASI の検査ロジック、結果のエンコード、デマングル等）は、基準 commit のファイルをそのまま wasm32-unknown-unknown に取り込んで使うのを既定にする。TS で書くのは OS 相当の層（仮想カーネル、ホストのアダプタ、JSPI まわり）と、流用モジュールとの境界だけ。理由: 他人が定義した挙動を TS で再現するより、上流への追従が機械的になる。どのモジュールを置き換えるかは調査結果（docs/reuse.md）で決める。
+
 ## 壊れにくさと保守性のための原則（型と構造）
 
 壊れ方として想定するのは主に 3 つ: (1) 上流の import 面が変わる、(2) 境界の数値の取り違え（ptr と len、u32 と u64、errno の符号）、(3) ランタイム差によるホスト側の差。これを型と構造で防ぐ。
