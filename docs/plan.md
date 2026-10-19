@@ -144,6 +144,7 @@ moonrun の Rust ソースのうち OS に触らない論理部分（ポリシ�
   - レビューで libc dlopen / FFI と runtime-private fd への依存を撤去。設計判断 7 の「動くホストを狭めない」に従い、ホストは公開 API を使う。TTL=0（D33）、Deno の UDP addressing / ordering（D34 / D35）、IPv6-only listener（D36）、時刻精度（D39）を未解消の乖離として記録。watcher は D17、受信 peer の IPv6 scope ID 欠落は D40。これらを stdout 正規化で隠さない。
   - Node/Deno の core は wasm・wasm-gc とも L3、131/131。Bun は各 41 invocation の **stdout** に JSC が公開しない stack 名が入り、D3 の stderr 正規化後も 90/131。全 core テストの合否と exit は一致。stdout を消す正規化で L2 達成とはしない。
   - Bun conformance は 32 mismatch を分類し、28 stderr-only を D3 の限定正規化、1 stderr+exit を D37 の修正で解消。3 stdout-only は理由付きで残す（105/3/0/3）。Node/Deno は 108/3/0/0。CLI 22/22、live skills 6/6 は全 runtime で維持。
+  - nightly の既知の差で新しい regression を見落とさないよう、`test/conformance/expected-differences.json` で runtime / invocation / test / target ごとの期待差分を固定。既定で読み、未登録の差と必須差分の消失は両方失敗にする。D39 の ctime だけは flaky を許す。既知差分だけなら CI は成功するが、raw 一致数と互換レベルの未達は変わらない。
   - suite の母数は子 runner の重複記録を除いた外側の 27 invocation。使う正規化の ID は D1・D3・D5・D12。Deno の外部 Module-only は D38 / Bun は D37、公開 API の制約は D33–D36・D39・D40 を参照。残る差を `docs/divergences.md` に記録し、終了条件の未達を明示する。
 - **P7（本計画の範囲外・任意）**: ブラウザアダプタ（メモリ VFS / OPFS、WebSocket 中継の NetPort、ホスト名を中継に渡すための偽 IP DNS）。workerd は専用コード（専用アダプタ・サブパス・文字列定数名前空間対応・静的 wasm import 分岐）を一切書かず、バンドル済み Module を `Engine.load` に渡して試し、どこまで動くかを記録するのみ。
 
@@ -180,7 +181,9 @@ Deno は各回で socket が 20/25（D33–D36 の 5 件）、fs が 49/50 → 5
 | websocket | 27/27 (2/2) | 27/27 (2/2) |
 | pipe | 3/3 (1/1) | 3/3 (1/1) |
 
-`pnpm typecheck`・`pnpm lint`（層チェック含む）は成功。`pnpm test` は **25 files / 399 passed / 1 skipped**（任意の live TLS）。SQLite ABI は既存の 9/9。回帰テストは protocol 行の順序・重複・message 保持、nested moon の全出力と失敗 status、3 runtime の nullable js-string + native GC-array・未知 import 保持、watcher の rename と UDP close を確認する。FFI の timestamp / socket 動作に依存する 6 tests は実装の撤去に合わせて除いた。
+`pnpm typecheck`・`pnpm lint`（層チェック含む）は成功。`pnpm test` は **25 files / 405 passed / 1 skipped**（任意の live TLS）。SQLite ABI は既存の 9/9。回帰テストは protocol 行の順序・重複・message 保持、nested moon の全出力と失敗 status、3 runtime の nullable js-string + native GC-array・未知 import 保持、watcher の rename と UDP close を確認する。FFI の timestamp / socket 動作に依存する 6 tests は実装の撤去に合わせて除いた。期待差分の照合・新しい差・解消済みの差・重複・fingerprint・flaky 制約の回帰テストを追加した。
+
+期待差分の導入後、node / deno / bun の core wasm・wasm-gc・async の **9 コマンドが全て exit 0**。raw 一致数は上表の通りで、Deno async の今回の値は 26/27、D39 は発生しなかった。実際に照合した ID は D3・D33–D36。Bun の D33 の項目を削った一覧では unexpected=1 / exit 1、同一の Node array test に必須の期待差分を加えた一覧では missingExpected=1 / exit 1 を確認した。ログ・JSON は `.cache/expected-differences/`。既定で一覧を読むので workflow の変更は不要。
 
 CI は part 1 で追加済み（push/PR の型・lint・unit・Node wasm-gc smoke、schedule/dispatch の node 24 / node 26 / deno / bun matrix）。MoonBit は `moonbit-version` と mise の moonup で固定。GitHub 上の実行や公開は行っていない。
 

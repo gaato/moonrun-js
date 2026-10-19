@@ -61,3 +61,11 @@ Bun の分類（part 1 → part 2）:
 | core wasm / wasm-gc: 各 41 invocations | **すべて stdout**（例外の文字列検査）、stderr-only / exit 差は 0 | JSC の位置・関数番号が無く名前を復元できない。各 90/131 一致、7874/7874・7894/7894 tests の合否は一致 |
 
 比較に使う divergence ID は **D1**（匿名 wasm hash）、**D3**（Bun stderr の上記限定正規化）、**D5**（明示した CLI case の usage 名）、**D12**（`--unordered`）。D6 は既知の差として報告するだけで正規化しない。D17・D33–D36・D39・D40 や stdout の stack を無条件に同じ扱いにはしない。レポートは Bun の正規化前の fields も `rawFields` に記録する。
+
+CI の期待差分:
+
+- `scripts/suite.ts` は既定で `test/conformance/expected-differences.json` を読む。`--expected-differences <json>` で別の一覧を指定できる。runtime・suite・target・wasm invocation と test file/index を限定し、ID がこの表にあることを検証する。`-p` の指定時はその package の期待差分だけを検査する。
+- 一覧には現在の Bun core の D3（各 target 41 invocations / 340 test records）、Deno async の D33–D36（1 invocation / 5 tests）、Bun async の D33（1 test）を登録した。D39 の ctime test だけは `flaky: true` で出ても出なくてもよい。任意の差を flaky にすることは許さない。D17 / D40 は期待差分に入れていない。
+- fingerprint は reference / actual の **両方**の result record を固定する。D3 はフレームの名前・位置だけを除き、フレーム数・エラー文・全ての他のフィールドを保持する（JSC の divide/remainder by zero 等の文言も固定）。D34 は message 内で同一であることを確認した loopback / wildcard の port だけを可変とする。異なる port の組み合わせや別のエラーは一致しない。
+- 一覧と異なる出力・新しい test の差・exit / signal / stderr の差は失敗。必須の期待差分が無くなっても失敗し、解消済みの項目の更新を要求する。既存の D3 stderr / D12 順序の正規化は継続する。列挙した result record 以外の stdout は変更しない。
+- exit 0 は「差が全て登録通り」であり、互換レベル L2 / L3 の達成ではない。raw の一致 invocation 数と `mismatches` を残し、`expected` / `unexpected` / `missingExpected` と実際に一致した divergence ID を別に報告する。

@@ -4,6 +4,7 @@
 //
 //   node scripts/suite.ts <async|core|x|path> [--target wasm|wasm-gc] [-p <pkg>]... [--refresh-ref] [--unordered] [--runtime node|deno|bun]
 //
+// Optional: --expected-differences <json> overrides test/conformance/expected-differences.json.
 // Reports go to .cache/reports/<suite>-<target>.json.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -17,7 +18,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
-import { jscStderr, unorderedResults } from './comparison.ts';
+import {
+  type ExpectedDifference,
+  type ExpectedDifferences,
+  jscStderr,
+  matchExpectedDifferences,
+  unorderedResults,
+  validateExpectedDifferences,
+} from './comparison.ts';
 import { checkoutUpstream } from './upstream.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -47,6 +55,31 @@ const runtime = option('--runtime') ?? 'node';
 const jsRunner = path.join(
   repoRoot,
   runtime === 'node' ? 'bin/moonrun-js' : `bin/moonrun-js-${runtime}`,
+);
+
+const expectations = JSON.parse(
+  readFileSync(
+    path.resolve(
+      repoRoot,
+      option('--expected-differences') ?? 'test/conformance/expected-differences.json',
+    ),
+    'utf8',
+  ),
+) as ExpectedDifferences;
+validateExpectedDifferences(
+  expectations,
+  readFileSync(path.join(repoRoot, 'docs/divergences.md'), 'utf8'),
+);
+const expected = (expectations[runtime] ?? []).filter(
+  (entry) =>
+    entry.suite === suite &&
+    entry.fingerprints[target] !== undefined &&
+    (packages.length === 0 ||
+      packages.includes(
+        suite === 'core'
+          ? `moonbitlang/core/${path.posix.dirname(entry.invocation)}`
+          : path.posix.dirname(entry.invocation),
+      )),
 );
 
 function checkout(): string {
@@ -181,12 +214,28 @@ record(project, jsRunner, jsDir, path.join(cache, 'build', key, runtime));
 const ref = load(refDir);
 const js = load(jsDir);
 const mismatches: Array<{ argv: string[]; field: string; detail: string }> = [];
+const unexpected: typeof mismatches = [];
+const matched = new Set<ExpectedDifference>();
 for (const [k, r] of ref) {
   const j = js.get(k);
   if (j === undefined) {
-    mismatches.push({ argv: r.argv, field: 'missing', detail: 'moonrun-js was not invoked' });
+    const missing = { argv: r.argv, field: 'missing', detail: 'moonrun-js was not invoked' };
+    mismatches.push(missing);
+    unexpected.push(missing);
     continue;
   }
+  const invocation = r.argv
+    .find((arg) => arg.startsWith(`<build>/${target}/debug/test/`))
+    ?.slice(`<build>/${target}/debug/test/`.length);
+  const accepted = matchExpectedDifferences(
+    r.stdout,
+    j.stdout,
+    expected.filter((entry) => entry.invocation === invocation),
+    target,
+  );
+  for (const entry of accepted.matched) matched.add(entry);
+  const sameText = (a: string, b: string): boolean =>
+    unordered ? unorderedResults(a) === unorderedResults(b) : a === b;
   for (const field of ['exit', 'signal', 'stdout', 'stderr'] as const) {
     const same =
       field === 'stdout' && unordered
@@ -197,17 +246,22 @@ for (const [k, r] of ref) {
     if (!same) {
       const detail =
         field === 'exit' || field === 'signal'
-          ? `${r.exit} != ${j.exit}`
+          ? `${r[field]} != ${j[field]}`
           : firstDifference(String(r[field]), String(j[field]));
-      mismatches.push({ argv: r.argv, field, detail });
+      const difference = { argv: r.argv, field, detail };
+      mismatches.push(difference);
+      if (field !== 'stdout' || !sameText(r.stdout, accepted.stdout)) unexpected.push(difference);
     }
   }
 }
 for (const [k, j] of js) {
   if (!ref.has(k)) {
-    mismatches.push({ argv: j.argv, field: 'extra', detail: 'only moonrun-js was invoked' });
+    const extra = { argv: j.argv, field: 'extra', detail: 'only moonrun-js was invoked' };
+    mismatches.push(extra);
+    unexpected.push(extra);
   }
 }
+const missingExpected = expected.filter((entry) => !entry.flaky && !matched.has(entry));
 mkdirSync(path.join(cache, 'reports'), { recursive: true });
 const reportPath = path.join(
   cache,
@@ -221,6 +275,9 @@ writeFileSync(
       invocations: ref.size,
       normalizations: [...(unordered ? ['D12'] : []), ...(runtime === 'bun' ? ['D3'] : [])],
       mismatches,
+      expected: [...matched],
+      unexpected,
+      missingExpected,
     },
     null,
     2,
@@ -230,7 +287,14 @@ const bad = new Set(mismatches.map((m) => JSON.stringify(m.argv))).size;
 console.log(
   `${key}: ${ref.size - bad}/${ref.size} invocations identical; report ${path.relative(repoRoot, reportPath)}`,
 );
-for (const m of mismatches.slice(0, 10)) {
+console.log(
+  `Expected differences matched: ${[...new Set([...matched].map((entry) => entry.divergence))].sort().join(', ') || 'none'} (${matched.size} entries); unexpected: ${unexpected.length}; missing expected: ${missingExpected.length}`,
+);
+for (const m of unexpected.slice(0, 10)) {
   console.log(`- [${m.field}] ${m.argv.at(-2) ?? ''}\n  ${m.detail.replaceAll('\n', '\n  ')}`);
 }
-process.exitCode = mismatches.length === 0 ? 0 : 1;
+for (const entry of missingExpected)
+  console.log(
+    `- missing expected ${entry.divergence}: ${entry.invocation} ${JSON.stringify(entry.tests)}`,
+  );
+process.exitCode = unexpected.length === 0 && missingExpected.length === 0 ? 0 : 1;
