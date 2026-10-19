@@ -76,7 +76,14 @@ interface Record {
 function record(project: string, runner: string, out: string, build: string): void {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
-  const args = ['test', '--target', target, '--target-dir', build, ...packages.flatMap((p) => ['-p', p])];
+  const args = [
+    'test',
+    '--target',
+    target,
+    '--target-dir',
+    build,
+    ...packages.flatMap((p) => ['-p', p]),
+  ];
   const started = Date.now();
   const result = spawnSync('moon', args, {
     cwd: project,
@@ -91,7 +98,7 @@ function record(project: string, runner: string, out: string, build: string): vo
       MOONRUN_JS_RECORD_BUILD: build,
     },
   });
-  const tail = (result.stdout ?? '').trim().split('\n').slice(-1)[0] ?? '';
+  const tail = result.stdout.trim().split('\n').slice(-1)[0] ?? '';
   console.log(`${path.basename(runner)}: ${tail} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
 }
 

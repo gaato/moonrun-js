@@ -49,16 +49,12 @@ function isHostFrame(line: string): boolean {
 
 /** The exception's stack (or string form) as moonrun would see it. */
 export function exceptionLines(exception: unknown): DiagnosticLine[] {
-  let text: string;
   const stack =
     typeof exception === 'object' && exception !== null && 'stack' in exception
       ? exception.stack
       : undefined;
-  if (stack !== undefined && stack !== null) {
-    text = String(stack);
-  } else {
-    text = String(exception);
-  }
+  // moonrun reads `.stack` and falls back to the value's string form.
+  const text = typeof stack === 'string' ? stack : String(exception as string);
   return text
     .split('\n')
     .filter((line) => !isHostFrame(line))

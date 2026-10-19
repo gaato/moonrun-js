@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check . && node scripts/check-layers.ts",
+    "lint": "biome check . && oxlint --type-aware --deny-warnings src scripts test && node scripts/check-layers.ts",
     "format": "biome format --write .",
     "test": "vitest run",
     "gen": "node scripts/gen-imports.ts"
@@ -31,8 +31,13 @@
     "@biomejs/biome": "2.5.15",
     "@types/node": "^24.19.2",
     "fast-check": "4.10.2",
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "7.0.2004",
     "tsdown": "0.23.1",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
+  },
+  "dependencies": {
+    "@noble/ciphers": "2.4.0"
   }
 }

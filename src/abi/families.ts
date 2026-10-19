@@ -4,6 +4,7 @@ import { ffiBytes } from './legacy/ffi-bytes.ts';
 import { fsUnstable } from './legacy/fs-unstable.ts';
 import { io } from './legacy/io.ts';
 import { consoleLog, moonbit, spectest } from './legacy/print.ts';
+import { rand } from './legacy/rand.ts';
 import { sys } from './legacy/sys.ts';
 import { time } from './legacy/time.ts';
 
@@ -15,6 +16,7 @@ export const FAMILIES: Readonly<Record<string, ImportFamily>> = {
   __moonbit_time_unstable: time,
   __moonbit_sys_unstable: sys,
   __moonbit_io_unstable: io,
+  __moonbit_rand_unstable: rand,
   __moonbit_fs_unstable: fsUnstable,
   exception,
   'ffi-bytes': ffiBytes,

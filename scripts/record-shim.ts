@@ -17,8 +17,11 @@ const scrub = (s: string): string =>
 const argv = process.argv.slice(2);
 
 const result = spawnSync(runner, argv, { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: 1 << 30 });
-const stdout = result.stdout ?? Buffer.alloc(0);
-const stderr = result.stderr ?? Buffer.alloc(0);
+if (result.error !== undefined) {
+  console.error(`record-shim: cannot run ${runner}: ${result.error.message}`);
+  process.exit(127);
+}
+const { stdout, stderr } = result;
 process.stdout.write(stdout);
 process.stderr.write(stderr);
 
