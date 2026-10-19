@@ -193,7 +193,7 @@ export async function run(
   const noStackTrace = options.noStackTrace ?? false;
 
   const classify = (error: unknown): CallOutcome => {
-    const lines = exceptionLines(error);
+    const lines = exceptionLines(error, loaded.module);
     const formatted = loaded.diagnostics.render(lines, loaded.sourceMap, noStackTrace);
     if (error instanceof WebAssembly.RuntimeError || error instanceof WebAssembly.Exception) {
       return { kind: 'guest-failure', diagnostic: formatted };

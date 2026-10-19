@@ -3,6 +3,8 @@ import dns from 'node:dns';
 import { readdirSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import { networkInterfaces } from 'node:os';
+// Deno drops dgram's nextTick callbacks until node:process is bootstrapped.
+import 'node:process';
 import { formatIp, parseIp } from '../../domains/policy/ip.ts';
 import type {
   ByteStream,
@@ -238,6 +240,14 @@ function datagramSocket(
     lookup: literalLookup(() => sending) as never,
   });
   let closed = false;
+  let pendingSends = 0;
+  const close = (): void => {
+    try {
+      socket.close();
+    } catch {
+      // A socket which has never bound has no host handle.
+    }
+  };
   socket.on('listening', () => events.listening());
   socket.on('connect', () => events.connected());
   socket.on('message', (msg: Buffer, rinfo: dgram.RemoteInfo) => {
@@ -252,9 +262,11 @@ function datagramSocket(
     }
   });
   const sent = (error: Error | null): void => {
+    pendingSends--;
     if (error !== null && !closed) {
       events.error(hostErrorOf(error));
     }
+    if (closed && pendingSends === 0) close();
   };
   const attempt = (f: () => void): Result<void, HostError> => {
     try {
@@ -314,6 +326,7 @@ function datagramSocket(
       }
     },
     send: (data, to) => {
+      pendingSends++;
       sending = true;
       try {
         if (to === undefined) {
@@ -340,11 +353,8 @@ function datagramSocket(
     close: () => {
       if (!closed) {
         closed = true;
-        try {
-          socket.close();
-        } catch {
-          // Already closed.
-        }
+        // close(2) preserves accepted datagrams; Deno otherwise drops queued sends.
+        if (pendingSends === 0) close();
       }
     },
   };

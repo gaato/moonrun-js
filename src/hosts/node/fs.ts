@@ -44,11 +44,19 @@ const utf8 = new TextDecoder('utf-8', { fatal: true });
  */
 function readDirNames(dir: string): string[] {
   const names: string[] = [];
-  const handle = fs.opendirSync(dir, { encoding: 'latin1' });
+  const handle = fs.opendirSync(dir, { encoding: 'latin1', bufferSize: 32 });
   try {
     for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
       try {
-        names.push(utf8.decode(Buffer.from(entry.name, 'latin1')));
+        const name: unknown = entry;
+        const value = typeof name === 'string' || name instanceof Uint8Array ? name : entry.name;
+        names.push(
+          utf8.decode(
+            typeof value === 'string'
+              ? Buffer.from(value, process.versions['deno'] === undefined ? 'latin1' : 'utf8')
+              : value,
+          ),
+        );
       } catch {
         // Not UTF-8: Rust's `to_str()` filters these out.
       }

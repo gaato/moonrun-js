@@ -22,7 +22,7 @@ function attempt<T>(f: () => T): Result<T, HostError> {
   }
 }
 
-function kindOf(entry: fs.Dirent<Buffer> | fs.BigIntStats): FileKind {
+function kindOf(entry: fs.Dirent<string | Buffer> | fs.BigIntStats): FileKind {
   return entry.isFile()
     ? 'file'
     : entry.isDirectory()
@@ -69,12 +69,19 @@ function openFlags(flags: OpenFlags): number {
 function readDir(path: string): DirEntry[] {
   // `readdirSync` sorts (libuv scandir); `opendirSync` keeps the OS order like Rust's `read_dir`.
   // `encoding: 'buffer'` keeps raw name bytes; @types/node does not declare it for opendir.
-  const dir = fs.opendirSync(path, { encoding: 'buffer' as BufferEncoding });
+  const dir = fs.opendirSync(path, { encoding: 'buffer' as BufferEncoding, bufferSize: 32 });
   try {
     const entries: DirEntry[] = [];
     for (let e = dir.readSync(); e !== null; e = dir.readSync()) {
-      const entry = e as unknown as fs.Dirent<Buffer>;
-      entries.push({ name: new Uint8Array(entry.name), kind: kindOf(entry) });
+      const name = entryName(e);
+      const entry = asDirent(e);
+      entries.push({
+        name,
+        kind:
+          entry === undefined
+            ? kindOf(fs.lstatSync(Buffer.concat([Buffer.from(`${path}/`), name]), { bigint: true }))
+            : kindOf(entry),
+      });
     }
     return entries;
   } finally {
@@ -124,10 +131,12 @@ export function nodeFiles(cwd: string = process.cwd()): FilePort {
 }
 
 /** Runs a callback-style `node:fs` call (libuv thread pool) as a Result promise. */
-function settle<T>(start: (callback: (e: NodeJS.ErrnoException | null, value: T) => void) => void) {
+function settle<T>(
+  start: (callback: (e: NodeJS.ErrnoException | null | undefined, value: T) => void) => void,
+) {
   return new Promise<Result<T, HostError>>((resolve) => {
     try {
-      start((e, value) => resolve(e === null ? ok(value) : err(toHostError(e))));
+      start((e, value) => resolve(e === null || e === undefined ? ok(value) : err(toHostError(e))));
     } catch (e) {
       resolve(err(toHostError(e)));
     }
@@ -145,7 +154,7 @@ const ACCESS: Readonly<Record<AccessMode, number>> = {
 const O_PATH = 0o10000000;
 
 /** Linux `d_type` of a directory entry. */
-function direntType(entry: fs.Dirent<Buffer>): number {
+function direntType(entry: fs.Dirent<string | Buffer> | fs.BigIntStats): number {
   if (entry.isFIFO()) return 1;
   if (entry.isCharacterDevice()) return 2;
   if (entry.isDirectory()) return 4;
@@ -158,6 +167,23 @@ function direntType(entry: fs.Dirent<Buffer>): number {
 
 /** The path of an open descriptor (Linux procfs). */
 const fdPath = (fd: HostFd): string => `/proc/self/fd/${fd}`;
+
+/** Bun returns the name itself; Deno returns a string name even for buffer encoding. */
+function entryName(raw: unknown): Buffer {
+  const name = typeof raw === 'object' && raw !== null && 'name' in raw ? raw.name : raw;
+  if (typeof name === 'string') return Buffer.from(name);
+  if (name instanceof Uint8Array) return Buffer.from(name);
+  throw new TypeError('invalid directory entry');
+}
+
+function asDirent(raw: unknown): fs.Dirent<string | Buffer> | undefined {
+  return typeof raw === 'object' &&
+    raw !== null &&
+    'isFile' in raw &&
+    typeof raw.isFile === 'function'
+    ? (raw as fs.Dirent<string | Buffer>)
+    : undefined;
+}
 
 function directoryReader(fd: HostFd, dir: fs.Dir): DirectoryReader {
   const base = Buffer.from(`${fdPath(fd)}/`);
@@ -173,14 +199,19 @@ function directoryReader(fd: HostFd, dir: fs.Dir): DirectoryReader {
       if (entry === null) {
         return ok(null);
       }
-      const name = new Uint8Array(entry.name);
+      const name = entryName(entry);
       // `Dirent` has no `d_ino`; the entry's own inode is what getdents reports.
       const stat = await settle<fs.BigIntStats>((cb) =>
-        fs.lstat(Buffer.concat([base, entry.name]), { bigint: true }, cb),
+        fs.lstat(Buffer.concat([base, name]), { bigint: true }, cb),
       );
       const record: DirectoryRecord = {
         ino: stat.ok ? stat.value.ino : 0n,
-        type: direntType(entry),
+        type:
+          asDirent(entry) === undefined
+            ? stat.ok
+              ? direntType(stat.value)
+              : 0
+            : direntType(entry),
         name,
       };
       return ok(record);
@@ -195,6 +226,11 @@ function directoryReader(fd: HostFd, dir: fs.Dir): DirectoryReader {
 }
 
 function nodeAsyncFiles(at: (p: string) => string): AsyncFilePort {
+  type Listener = Parameters<AsyncFilePort['watch']>[1];
+  const watches = new Map<
+    string,
+    { watcher: fs.FSWatcher; fd: number; target: string; listeners: Set<Listener> }
+  >();
   const statOf = (p: string | Buffer, follow: boolean) =>
     settle<fs.BigIntStats>((cb) =>
       follow ? fs.stat(p, { bigint: true }, cb) : fs.lstat(p, { bigint: true }, cb),
@@ -253,6 +289,7 @@ function nodeAsyncFiles(at: (p: string) => string): AsyncFilePort {
       try {
         const dir = await fs.promises.opendir(fdPath(fd), {
           encoding: 'buffer' as BufferEncoding,
+          bufferSize: 32,
         });
         return ok(directoryReader(fd, dir));
       } catch (e) {
@@ -261,11 +298,70 @@ function nodeAsyncFiles(at: (p: string) => string): AsyncFilePort {
     },
     watch: (p, listener) =>
       attempt(() => {
-        const watcher = fs.watch(at(p), { persistent: false, encoding: 'utf8' }, (event, name) =>
-          listener(event === 'change' ? 'change' : 'rename', name),
-        );
-        watcher.on('error', () => undefined);
-        return { close: () => watcher.close() };
+        // Deno filters events by path and loses a renamed inode's writes. A procfs
+        // identity path keeps following the same inode, like inotify/Node.
+        const fd = fs.openSync(at(p), O_PATH);
+        try {
+          const stat = fs.fstatSync(fd, { bigint: true });
+          const key = `${stat.dev}:${stat.ino}`;
+          let watch = watches.get(key);
+          if (watch === undefined) {
+            const listeners = new Set<Listener>();
+            const identity = fdPath(fd as HostFd);
+            const notify = (event: string, name: string | null): void => {
+              // Deno also filters a directory's children against its old canonical
+              // path after it moves. Re-arm against the identity's current target.
+              const current = watches.get(key);
+              if (
+                process.versions['deno'] !== undefined &&
+                event === 'rename' &&
+                current !== undefined
+              ) {
+                try {
+                  const target = fs.readlinkSync(identity);
+                  if (target !== current.target) {
+                    current.target = target;
+                    current.watcher.close();
+                    current.watcher = start();
+                  }
+                } catch {
+                  // An unlinked inode has no path to watch any longer.
+                }
+              }
+              for (const notify of listeners)
+                notify(event === 'change' ? 'change' : 'rename', name);
+            };
+            const start = (): fs.FSWatcher => {
+              const watcher = fs.watch(identity, { persistent: false, encoding: 'utf8' }, notify);
+              watcher.on('error', () => undefined);
+              return watcher;
+            };
+            watch = { watcher: start(), fd, target: fs.readlinkSync(identity), listeners };
+            watches.set(key, watch);
+          } else {
+            // Deno removes the OS watch when either duplicate watcher closes.
+            fs.closeSync(fd);
+          }
+          const shared = watch;
+          const subscribed: Listener = (event, name) => listener(event, name);
+          shared.listeners.add(subscribed);
+          let closed = false;
+          return {
+            close: () => {
+              if (closed) return;
+              closed = true;
+              shared.listeners.delete(subscribed);
+              if (shared.listeners.size === 0) {
+                watches.delete(key);
+                shared.watcher.close();
+                fs.closeSync(shared.fd);
+              }
+            },
+          };
+        } catch (e) {
+          fs.closeSync(fd);
+          throw e;
+        }
       }),
   };
 }

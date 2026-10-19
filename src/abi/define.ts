@@ -20,6 +20,37 @@ type JsOf<T extends ValType> = T extends 'i64' | 'u64'
 export type JsArgs<P extends readonly ValType[]> = { -readonly [K in keyof P]: JsOf<P[K]> };
 export type JsReturn<R extends ResultType> = R extends ValType ? JsOf<R> : void;
 
+/** Signatures emitted by the upstream import-table generators. */
+export interface GeneratedSignature {
+  readonly params: readonly (readonly [string, ValType])[];
+  readonly result: ResultType;
+}
+
+type GeneratedArgs<P extends GeneratedSignature['params']> = {
+  -readonly [I in keyof P]: P[I] extends readonly [string, infer T extends ValType]
+    ? JsOf<T>
+    : never;
+};
+
+export type GeneratedImpl<S extends GeneratedSignature> = (
+  ...args: GeneratedArgs<S['params']>
+) => JsReturn<S['result']>;
+
+export interface GeneratedSuspendingHandler<S extends GeneratedSignature> {
+  readonly suspends: true;
+  readonly impl: (
+    ...args: GeneratedArgs<S['params']>
+  ) => JsReturn<S['result']> | Promise<JsReturn<S['result']>>;
+}
+
+export type GeneratedHandler<S extends GeneratedSignature> =
+  | GeneratedImpl<S>
+  | GeneratedSuspendingHandler<S>;
+
+export type GeneratedHandlers<T extends { readonly [K in keyof T]: GeneratedSignature }> = {
+  readonly [K in keyof T]: GeneratedHandler<T[K]>;
+};
+
 export interface FunctionImport {
   readonly kind: 'function';
   readonly params: readonly ValType[];

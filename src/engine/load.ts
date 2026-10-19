@@ -1,6 +1,7 @@
 import type { Diagnostics, SourceMap } from '../diagnostics/diag.ts';
 import { err, ok, type Result } from '../ports/result.ts';
 import { stringImports } from './js-string.ts';
+import { rememberFunctionBodies } from './stack.ts';
 
 /** A compiled guest, ready to run any number of times. */
 export interface LoadedModule {
@@ -45,6 +46,7 @@ export function compileBytes(
   let module: WebAssembly.Module;
   try {
     module = new WebAssembly.Module(bytes, COMPILE_OPTIONS);
+    rememberFunctionBodies(module, bytes);
   } catch (e) {
     // moonrun reports V8's message, which carries the "Uncaught" prefix.
     const cause = e instanceof Error ? `Uncaught ${e.name}: ${e.message}` : `Uncaught ${String(e)}`;

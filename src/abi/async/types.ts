@@ -5,6 +5,12 @@
  * per non-fake symbol.
  */
 import type { ASYNC_IMPORTS } from '../../generated/async-imports.ts';
+import type {
+  GeneratedHandler,
+  GeneratedHandlers,
+  GeneratedImpl,
+  GeneratedSuspendingHandler,
+} from '../define.ts';
 
 type Table = typeof ASYNC_IMPORTS;
 
@@ -15,31 +21,16 @@ export type ImplementedSymbol = {
   [K in AsyncSymbol]: Table[K]['kind'] extends 'fake' ? never : K;
 }[AsyncSymbol];
 
-type JsOf<T> = T extends 'i64' | 'u64' ? bigint : T extends 'i32' | 'u32' ? number : never;
-
-type ArgsOf<P> = {
-  -readonly [I in keyof P]: P[I] extends readonly [string, infer T] ? JsOf<T> : never;
-};
-
-type ReturnOf<R> = R extends 'void' ? void : JsOf<R>;
-
 /** The JavaScript signature of the import `K` (u32/u64 already normalized). */
-export type AsyncImpl<K extends AsyncSymbol> = (
-  ...args: ArgsOf<Table[K]['params']>
-) => ReturnOf<Table[K]['result']>;
+export type AsyncImpl<K extends AsyncSymbol> = GeneratedImpl<Table[K]>;
 
 /** An import that may suspend the guest (`WebAssembly.Suspending`). */
-export interface SuspendingHandler<K extends AsyncSymbol> {
-  readonly suspends: true;
-  readonly impl: (
-    ...args: ArgsOf<Table[K]['params']>
-  ) => ReturnOf<Table[K]['result']> | Promise<ReturnOf<Table[K]['result']>>;
-}
+export type SuspendingHandler<K extends AsyncSymbol> = GeneratedSuspendingHandler<Table[K]>;
 
-export type AsyncHandler<K extends AsyncSymbol> = AsyncImpl<K> | SuspendingHandler<K>;
+export type AsyncHandler<K extends AsyncSymbol> = GeneratedHandler<Table[K]>;
 
 /** One handler for every implemented symbol. */
-export type AsyncHandlers = { readonly [K in ImplementedSymbol]: AsyncHandler<K> };
+export type AsyncHandlers = GeneratedHandlers<Pick<Table, ImplementedSymbol>>;
 
 /** A family's share of the handlers; object literals are checked against it for typos. */
 export type HandlerGroup = Partial<AsyncHandlers>;

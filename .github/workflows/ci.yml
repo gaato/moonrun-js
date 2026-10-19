@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '23 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DENO_DIR: ${{ github.workspace }}/.cache/deno
+  XDG_CACHE_HOME: ${{ github.workspace }}/.cache/xdg
+
+jobs:
+  check:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: jdx/mise-action@v5.2.1
+      - name: Install pinned MoonBit
+        run: |
+          mise exec -- moonup install "$(cat moonbit-version)"
+          toolchain="$HOME/.moonup/toolchains/$(cat moonbit-version)"
+          echo "$toolchain/bin" >> "$GITHUB_PATH"
+          echo "MOONRUN_REFERENCE=$toolchain/bin/moonrun" >> "$GITHUB_ENV"
+      - run: mise exec -- pnpm install --frozen-lockfile
+      - run: mise exec -- pnpm typecheck
+      - run: mise exec -- pnpm lint
+      - run: mise exec -- pnpm test
+      - run: mise exec -- node scripts/suite.ts core --target wasm-gc -p moonbitlang/core/array
+
+  compatibility:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runtime: node, node: '24.21.0' }
+          - { runtime: node, node: '26.11.1' }
+          - { runtime: deno, node: '26.11.1' }
+          - { runtime: bun, node: '26.11.1' }
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: jdx/mise-action@v5.2.1
+      - name: Install pinned MoonBit and matrix Node
+        run: |
+          mise exec -- moonup install "$(cat moonbit-version)"
+          mise install node@${{ matrix.node }}
+          toolchain="$HOME/.moonup/toolchains/$(cat moonbit-version)"
+          echo "$toolchain/bin" >> "$GITHUB_PATH"
+          echo "MOONRUN_REFERENCE=$toolchain/bin/moonrun" >> "$GITHUB_ENV"
+      - run: mise exec -- pnpm install --frozen-lockfile
+      - run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm --runtime ${{ matrix.runtime }}
+      - if: always() && !cancelled()
+        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm-gc --runtime ${{ matrix.runtime }}
+      - if: always() && !cancelled()
+        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts async --target wasm --unordered --runtime ${{ matrix.runtime }}
+      - if: always() && !cancelled()
+        run: mise exec node@${{ matrix.node }} -- node scripts/difftest.ts test/conformance/skills.json --runtime ${{ matrix.runtime }}
+        env:
+          MOONRUN_JS_LIVE: '1'

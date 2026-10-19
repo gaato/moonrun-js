@@ -55,15 +55,7 @@ const reference =
 const cache = path.join(repoRoot, '.cache', 'conformance');
 
 /** Areas of moonrun that moonrun-js has not implemented yet; mismatches there are "pending". */
-const DEFAULT_PENDING = [
-  'async-kernel',
-  'sockets',
-  'process',
-  'signals',
-  'sqlite',
-  'policy',
-  'stack-size',
-];
+const DEFAULT_PENDING: readonly string[] = [];
 
 interface MoonSpec {
   readonly project: string;
@@ -303,6 +295,9 @@ function execute(runner: string, c: Case, wasm: string, dir: string): Promise<Ou
   ];
   const argv = (c.argv ?? ['<wasm>']).map((a) => bytesOf(subst(a, v)));
   const cmd = [
+    // Abort fixtures compare SIGABRT, not core files. Dumping a large runtime
+    // can exceed the case timeout and disturb concurrent timer/watch tests.
+    'ulimit -c 0;',
     'exec',
     'env',
     ...envArgs.map((a) => quote(bytesOf(subst(a, v)))),

@@ -14,25 +14,6 @@ import { SqliteEngine } from './engine.ts';
 import type { VfsDeps } from './vfs.ts';
 
 export type SqliteError = 'InvalidHandle' | 'Fault' | 'Overflow';
-class Failure extends Error {
-  readonly reason: SqliteError;
-  constructor(reason: SqliteError) {
-    super(reason);
-    this.reason = reason;
-  }
-}
-export function fault(reason: SqliteError = 'Fault'): never {
-  throw new Failure(reason);
-}
-/** Domain failures cross the ABI as Results, independently of SQLite status codes. */
-export function attempt<T>(operation: () => T): Result<T, SqliteError> {
-  try {
-    return ok(operation());
-  } catch (e) {
-    if (e instanceof Failure) return err(e.reason);
-    throw e;
-  }
-}
 export interface Database {
   ptr: number;
   ready: boolean;
@@ -77,35 +58,37 @@ export class SqliteHost {
     this.statements = new Handles(keys, 'sqlite-statement');
     this.mutexes = new Handles(keys, 'sqlite-database-mutex');
   }
-  #db(raw: bigint): Database {
-    return this.databases.get(asHandle(raw)) ?? fault('InvalidHandle');
+  db(raw: bigint): Result<Database, SqliteError> {
+    const database = this.databases.get(asHandle(raw));
+    return database === undefined ? err('InvalidHandle') : ok(database);
   }
-  #stmt(raw: bigint, leased = false): Statement {
+  stmt(raw: bigint): Result<Statement, SqliteError> {
     const key = canonical(asHandle(raw));
-    const statement = this.statements.get(key) ?? fault('InvalidHandle');
-    if (!leased && [...this.leases].some((w) => w.statement === key)) fault();
-    return statement;
+    const statement = this.statements.get(key);
+    if (statement === undefined) return err('InvalidHandle');
+    if ([...this.leases].some((w) => w.statement === key)) return err('Fault');
+    return ok(statement);
   }
-  #ready(raw: bigint): Database {
-    const database = this.#db(raw);
-    if (!database.ready) fault();
-    return database;
+  ready(raw: bigint): Result<Database, SqliteError> {
+    const database = this.db(raw);
+    if (!database.ok) return database;
+    return database.value.ready ? database : err('Fault');
   }
   entered(database: Database): boolean {
     return database.mutex !== undefined && (this.mutexes.get(database.mutex)?.depth ?? 0) !== 0;
   }
-  #forJob(raw: bigint): Database {
-    const database = this.#ready(raw);
-    if (this.entered(database)) fault();
-    return database;
+  forJob(raw: bigint): Result<Database, SqliteError> {
+    const database = this.ready(raw);
+    if (!database.ok) return database;
+    return this.entered(database.value) ? err('Fault') : database;
   }
-  #open(
+  open(
     filename: Uint8Array,
     flags: number,
     vfs: bigint,
-  ): { code: number; database: Database | undefined } {
+  ): Result<{ code: number; database: Database | undefined }, SqliteError> {
     const normalized = this.admit(filename, flags, vfs);
-    if (normalized < 0) return { code: -normalized, database: undefined };
+    if (normalized < 0) return ok({ code: -normalized, database: undefined });
     const e = this.engine;
     const name = e.allocate(filename, 1);
     const out = e.scratch(4);
@@ -113,29 +96,33 @@ export class SqliteHost {
     let code = e.x.sqlite3_open_v2(name.ptr, out, normalized, 0);
     name.free();
     const ptr = e.u32(out);
-    if (ptr === 0) return { code, database: undefined };
+    if (ptr === 0) return ok({ code, database: undefined });
     if (code === 0) code = e.x.mr_set_authorizer(ptr);
-    return { code, database: { ptr, ready: code === 0, mutex: undefined } };
+    return ok({ code, database: { ptr, ready: code === 0, mutex: undefined } });
   }
-  #close(raw: bigint): number {
-    if (raw === NULL_HANDLE) return 0;
+  close(raw: bigint): Result<number, SqliteError> {
+    if (raw === NULL_HANDLE) return ok(0);
     const key = canonical(asHandle(raw));
-    const db = this.#db(raw);
-    if (this.entered(db) || [...this.leases].some((w) => w.database === key)) fault();
+    const found = this.db(raw);
+    if (!found.ok) return found;
+    const db = found.value;
+    if (this.entered(db) || [...this.leases].some((w) => w.database === key)) return err('Fault');
     const code = this.engine.x.sqlite3_close(db.ptr);
     if (code === 0) {
       this.databases.remove(key);
       if (db.mutex !== undefined) this.mutexes.remove(db.mutex);
     }
-    return code;
+    return ok(code);
   }
-  #prepare(
+  prepare(
     database: Handle,
     sql: Uint8Array,
-  ): { code: number; statement: Statement | undefined; tail: number } {
-    const db = this.#db(database);
-    if (!db.ready) return { code: 21, statement: undefined, tail: 0 };
-    if (sql.length > 0x7fffffff) fault('Overflow');
+  ): Result<{ code: number; statement: Statement | undefined; tail: number }, SqliteError> {
+    const found = this.db(database);
+    if (!found.ok) return found;
+    const db = found.value;
+    if (!db.ready) return ok({ code: 21, statement: undefined, tail: 0 });
+    if (sql.length > 0x7fffffff) return err('Overflow');
     const e = this.engine;
     const input = e.allocate(sql, 2);
     const out = e.scratch(8);
@@ -145,27 +132,32 @@ export class SqliteHost {
     const tailPtr = e.u32(out + 4);
     const tail = tailPtr === 0 ? 0 : (tailPtr - input.ptr) / 2;
     input.free();
-    return { code, statement: ptr === 0 ? undefined : { ptr, database }, tail };
+    return ok({ code, statement: ptr === 0 ? undefined : { ptr, database }, tail });
   }
-  #finalize(raw: bigint): number {
-    if (raw === NULL_HANDLE) return 0;
-    const stmt = this.#stmt(raw);
+  finalize(raw: bigint): Result<number, SqliteError> {
+    if (raw === NULL_HANDLE) return ok(0);
+    const stmt = this.stmt(raw);
+    if (!stmt.ok) return stmt;
     this.statements.remove(asHandle(raw));
-    return this.engine.x.sqlite3_finalize(stmt.ptr);
+    return ok(this.engine.x.sqlite3_finalize(stmt.value.ptr));
   }
-  #mutex(raw: bigint): Handle {
-    const db = this.#ready(raw);
-    if (db.mutex !== undefined) return db.mutex;
-    if (this.engine.x.sqlite3_db_mutex(db.ptr) === 0) return NULL_HANDLE;
+  mutex(raw: bigint): Result<Handle, SqliteError> {
+    const found = this.ready(raw);
+    if (!found.ok) return found;
+    const db = found.value;
+    if (db.mutex !== undefined) return ok(db.mutex);
+    if (this.engine.x.sqlite3_db_mutex(db.ptr) === 0) return ok(NULL_HANDLE);
     db.mutex = this.mutexes.insert({ database: canonical(asHandle(raw)), depth: 0 });
-    return db.mutex;
+    return ok(db.mutex);
   }
-  #enter(raw: bigint, leave: boolean): void {
-    if (raw === NULL_HANDLE) return;
-    const mutex = this.mutexes.get(asHandle(raw)) ?? fault('InvalidHandle');
-    const db = this.#db(mutex.database);
-    if (leave && mutex.depth === 0) fault();
-    const ptr = this.engine.x.sqlite3_db_mutex(db.ptr);
+  enter(raw: bigint, leave: boolean): Result<void, SqliteError> {
+    if (raw === NULL_HANDLE) return ok(undefined);
+    const mutex = this.mutexes.get(asHandle(raw));
+    if (mutex === undefined) return err('InvalidHandle');
+    const db = this.db(mutex.database);
+    if (!db.ok) return db;
+    if (leave && mutex.depth === 0) return err('Fault');
+    const ptr = this.engine.x.sqlite3_db_mutex(db.value.ptr);
     if (leave) {
       this.engine.x.sqlite3_mutex_leave(ptr);
       mutex.depth--;
@@ -173,14 +165,16 @@ export class SqliteHost {
       this.engine.x.sqlite3_mutex_enter(ptr);
       mutex.depth++;
     }
+    return ok(undefined);
   }
-  #column(raw: bigint, column: number, metadata = false): number {
-    const ptr = this.#stmt(raw).ptr;
+  column(raw: bigint, column: number, metadata = false): Result<number, SqliteError> {
+    const stmt = this.stmt(raw);
+    if (!stmt.ok) return stmt;
+    const ptr = stmt.value.ptr;
     const count = metadata
       ? this.engine.x.sqlite3_column_count(ptr)
       : this.engine.x.sqlite3_data_count(ptr);
-    if (column < 0 || column >= count) fault();
-    return ptr;
+    return column < 0 || column >= count ? err('Fault') : ok(ptr);
   }
   text(ptr: number): Uint8Array {
     return ptr === 0
@@ -190,46 +184,6 @@ export class SqliteHost {
   message(db: Database): Uint8Array {
     return this.text(this.engine.x.sqlite3_errmsg16(db.ptr));
   }
-  db(raw: bigint): Result<Database, SqliteError> {
-    return attempt(() => this.#db(raw));
-  }
-  stmt(raw: bigint): Result<Statement, SqliteError> {
-    return attempt(() => this.#stmt(raw));
-  }
-  ready(raw: bigint): Result<Database, SqliteError> {
-    return attempt(() => this.#ready(raw));
-  }
-  forJob(raw: bigint): Result<Database, SqliteError> {
-    return attempt(() => this.#forJob(raw));
-  }
-  open(
-    filename: Uint8Array,
-    flags: number,
-    vfs: bigint,
-  ): Result<{ code: number; database: Database | undefined }, SqliteError> {
-    return attempt(() => this.#open(filename, flags, vfs));
-  }
-  close(raw: bigint): Result<number, SqliteError> {
-    return attempt(() => this.#close(raw));
-  }
-  prepare(
-    database: Handle,
-    sql: Uint8Array,
-  ): Result<{ code: number; statement: Statement | undefined; tail: number }, SqliteError> {
-    return attempt(() => this.#prepare(database, sql));
-  }
-  finalize(raw: bigint): Result<number, SqliteError> {
-    return attempt(() => this.#finalize(raw));
-  }
-  mutex(raw: bigint): Result<Handle, SqliteError> {
-    return attempt(() => this.#mutex(raw));
-  }
-  enter(raw: bigint, leave: boolean): Result<void, SqliteError> {
-    return attempt(() => this.#enter(raw, leave));
-  }
-  column(raw: bigint, column: number, metadata = false): Result<number, SqliteError> {
-    return attempt(() => this.#column(raw, column, metadata));
-  }
   summary(): string | undefined {
     const parts: string[] = [];
     if (this.databases.size !== 0) parts.push(`databases=${this.databases.size}`);
@@ -238,7 +192,8 @@ export class SqliteHost {
   }
   dispose(): void {
     for (const mutex of this.mutexes.takeAll()) {
-      const db = this.#db(mutex.database);
+      const db = this.databases.get(mutex.database);
+      if (db === undefined) continue;
       const ptr = this.engine.x.sqlite3_db_mutex(db.ptr);
       for (let i = 0; i < mutex.depth; i++) this.engine.x.sqlite3_mutex_leave(ptr);
     }
@@ -247,11 +202,6 @@ export class SqliteHost {
     for (const db of this.databases.takeAll()) this.engine.x.sqlite3_close(db.ptr);
     this.engine.vfs.closeAll();
   }
-}
-
-function value<T>(result: Result<T, SqliteError>): T {
-  if (!result.ok) fault(result.error);
-  return result.value;
 }
 
 export type WorkInput =
@@ -263,6 +213,7 @@ export type WorkInput =
 /** One-shot pool work. Its lease survives execution until the Job is released. */
 export class SqliteWork implements DomainWork {
   outcome: Outcome | undefined;
+  #error: SqliteError = 'Fault';
   #input: WorkInput | undefined;
   readonly host: SqliteHost;
   readonly database: Handle | undefined;
@@ -297,18 +248,40 @@ export class SqliteWork implements DomainWork {
       changes: undefined,
       owned: undefined,
     };
-    let db = this.database === undefined ? undefined : value(h.db(this.database));
+    const failed = (error: SqliteError): void => {
+      this.#error = error;
+      finish(-1);
+    };
+    const database = this.database === undefined ? ok(undefined) : h.db(this.database);
+    if (!database.ok) {
+      failed(database.error);
+      return;
+    }
+    let db = database.value;
     switch (input.kind) {
       case 'open': {
-        const opened = value(h.open(input.filename, input.flags, NULL_HANDLE));
+        const opening = h.open(input.filename, input.flags, NULL_HANDLE);
+        if (!opening.ok) {
+          failed(opening.error);
+          return;
+        }
+        const opened = opening.value;
         result.code = opened.code;
         db = opened.database;
         if (db !== undefined && result.code === 0) result.owned = { kind: 'database', value: db };
         break;
       }
       case 'prepare': {
-        if (this.database === undefined) fault();
-        const prepared = value(h.prepare(this.database, input.sql));
+        if (this.database === undefined) {
+          failed('Fault');
+          return;
+        }
+        const preparing = h.prepare(this.database, input.sql);
+        if (!preparing.ok) {
+          failed(preparing.error);
+          return;
+        }
+        const prepared = preparing.value;
         result.code = prepared.code;
         if (prepared.statement !== undefined) {
           result.tail = prepared.tail;
@@ -317,7 +290,10 @@ export class SqliteWork implements DomainWork {
         break;
       }
       case 'step': {
-        if (db === undefined) fault();
+        if (db === undefined) {
+          failed('Fault');
+          return;
+        }
         const readOnly = x.sqlite3_stmt_readonly(input.ptr) !== 0;
         const before = x.sqlite3_total_changes64(db.ptr);
         result.code = x.sqlite3_step(input.ptr);
@@ -342,37 +318,36 @@ export class SqliteWork implements DomainWork {
     this.outcome = result;
     finish(result.code);
   }
-  #result(): Outcome {
-    return this.outcome ?? fault();
-  }
-  #take(): Handle {
-    const r = this.#result();
-    if (r.code !== 0 || r.owned === undefined) fault();
-    const owned = r.owned;
-    r.owned = undefined;
-    return owned.kind === 'database'
-      ? this.host.databases.insert(owned.value)
-      : this.host.statements.insert(owned.value);
-  }
-  #discard(): SqliteWork | undefined {
-    const r = this.#result();
-    const owned = r.owned;
-    if (owned === undefined) return undefined;
-    r.owned = undefined;
-    return new SqliteWork(
-      this.host,
-      { kind: owned.kind === 'database' ? 'close' : 'finalize', ptr: owned.value.ptr },
-      this.database,
-    );
-  }
   result(): Result<Outcome, SqliteError> {
-    return attempt(() => this.#result());
+    return this.outcome === undefined ? err(this.#error) : ok(this.outcome);
   }
   take(): Result<Handle, SqliteError> {
-    return attempt(() => this.#take());
+    const result = this.result();
+    if (!result.ok) return result;
+    const r = result.value;
+    if (r.code !== 0 || r.owned === undefined) return err('Fault');
+    const owned = r.owned;
+    r.owned = undefined;
+    return ok(
+      owned.kind === 'database'
+        ? this.host.databases.insert(owned.value)
+        : this.host.statements.insert(owned.value),
+    );
   }
   discard(): Result<SqliteWork | undefined, SqliteError> {
-    return attempt(() => this.#discard());
+    const result = this.result();
+    if (!result.ok) return result;
+    const r = result.value;
+    const owned = r.owned;
+    if (owned === undefined) return ok(undefined);
+    r.owned = undefined;
+    return ok(
+      new SqliteWork(
+        this.host,
+        { kind: owned.kind === 'database' ? 'close' : 'finalize', ptr: owned.value.ptr },
+        this.database,
+      ),
+    );
   }
   release(): void {
     if (!this.host.leases.delete(this)) return;

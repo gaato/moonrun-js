@@ -29,12 +29,15 @@ const stdio = nodeStdio();
 stdio.writeStdout(stdout);
 stdio.writeStderr(stderr);
 
-if (dir !== undefined && argv[0] !== '--version') {
+if (dir !== undefined && argv.some((arg) => build !== undefined && arg.startsWith(`${build}/`))) {
   // Key by argv with the project root removed, so both runs produce the same keys.
   const normalized = argv.map(scrub);
   const key = createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 24);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
+    // Only the outer moon test's wasm belongs to the suite. Nested shell tests
+    // invoke identical argv with different stdin, and cancel some children before
+    // they start; their observable output is already captured by the outer run.
     path.join(dir, `${key}.json`),
     JSON.stringify({
       argv: normalized,

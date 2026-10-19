@@ -139,7 +139,47 @@ moonrun の Rust ソースのうち OS に触らない論理部分（ポリシ�
   - 終了条件: async スイート全体が一致、moonrun の sqlite / policy 系テストケース一致。
 - **P6 マルチランタイム仕上げ**: JSC・SpiderMonkey のスタック解析、必要なら Deno/Bun 専用アダプタ。互換レベル L0 exit / L1 stdout / L2 stderr（正規化）/ L3 バイト一致。
   - 終了条件: V8 系（Node・Deno・Chromium）は core と async で L3、Bun（JSC）は L2。
+  - **2026-10-19: 実装・測定済み、終了条件は未達（乖離を明記）**。共有 node: ホストで成功 callback の `undefined`、Deno/Bun の Dirent、Deno の rename 後の watcher、UDP close を吸収。Deno の匿名フレームをコード位置から復元し、JSC の公開するフレームを解析。SQLite の生成表ハンドラ型を async と共有し、ドメインの `fault`/`attempt` を Result の伝播に置換。push/PR の検査・Node smoke と schedule/dispatch の 4 runtime matrix をローカル CI 定義に追加。MoonBit は `moonbit-version` と mise の moonup で固定。
+  - Node/Deno の core は wasm・wasm-gc とも 131/131 invocation、conformance は各 108 identical / 3 known / 0 pending / 0 mismatch。CLI 22/22、live skills 6/6。Bun は core の全テストの合否は一致するが、stdout の例外文に関数名が無いため 90/131 invocation（D3）。async の残りは Deno の UDP / IPv6（D33–D36）・ctime 精度（D39）と watcher の観測時刻（D17）、Bun の TTL=0（D33）。native js-string の Bun 差は D37。Deno の Module-only の匿名フレーム制約は D38。
+  - suite は子 runner の重複記録を止め、async の母数は旧 43 でなく外側の 27 invocation。D12 の並行 child stderr は raw の不一致として残す。詳細と再現ケースは `docs/divergences.md`。
 - **P7（本計画の範囲外・任意）**: ブラウザアダプタ（メモリ VFS / OPFS、WebSocket 中継の NetPort、ホスト名を中継に渡すための偽 IP DNS）。workerd は専用コード（専用アダプタ・サブパス・文字列定数名前空間対応・静的 wasm import 分岐）を一切書かず、バンドル済み Module を `Engine.load` に渡して試し、どこまで動くかを記録するのみ。
+
+## P6 の測定結果（2026-10-19）
+
+全コマンドを `mise exec --` 経由で実行。ログは `.cache/p6/before/`・`.cache/p6/after/`、JSON は `.cache/reports/` と `.cache/p6/after/*-moonrun-tests.json`。conformance の列は identical / known / pending / mismatch。正規化で新しい不一致を隠していない。
+
+| 検証 | Node 26.11.1 | Deno 2.9.7 | Bun 1.4.2 |
+|---|---:|---:|---:|
+| core wasm: 一致 invocation | 131/131 | 131/131 | 90/131 |
+| core wasm: 成功テスト | 7874/7874 | 7874/7874 | 7874/7874 |
+| core wasm-gc: 一致 invocation | 131/131 | 131/131 | 90/131 |
+| core wasm-gc: 成功テスト | 7894/7894 | 7894/7894 | 7894/7894 |
+| moonrun-tests.json | 108/3/0/0 | 108/3/0/0 | 76/3/0/32 |
+| cli-argv.json | 22/22 | 22/22 | 22/22 |
+| skills.json（live） | 6/6 | 6/6 | 6/6 |
+| async 全体: 一致 invocation（raw） | 26/27 | 24/27 | 25/27 |
+| async 全体: 成功テスト | 546/546 | 540/546 | 545/546 |
+
+async の raw 不一致には、3 ランタイムとも D12 の並行 child stderr が 1 invocation 含まれる。Node のゲスト検査は全成功。Deno の失敗は socket 5 + ctime 1、Bun は TTL=0 の 1。旧母数 43 から 27 への修正理由は `docs/divergences.md` の測定上の注意を参照。
+
+パッケージ別の最後の単独実行（成功テスト数。一致 invocation は括弧内）:
+
+| async パッケージ | Deno | Bun |
+|---|---:|---:|
+| fs | 50/50 (1/1) | 50/50 (1/1) |
+| socket | 20/25 (0/1) | 24/25 (0/1) |
+| tls | 8/8 (1/1) | 8/8 (1/1) |
+| http | 55/55 (2/2) | 55/55 (2/2) |
+| process | 39/39 (2/2) | 39/39 (2/2) |
+| signal | 5/5 (1/1) | 5/5 (1/1) |
+| shell | 76/76 (1/2; D12) | 76/76 (2/2) |
+| stdio | 1/1 (1/1) | 1/1 (1/1) |
+| websocket | 27/27 (2/2) | 27/27 (2/2) |
+| pipe | 3/3 (1/1) | 3/3 (1/1) |
+
+fs の成功数は D17/D39 により再実行で変動する（44〜50/50 を観測）。Node の typecheck・lint（層チェックを含む）は成功、unit は 24 files / 393 passed / 1 skipped（任意の live TLS）。SQLite ABI は既存の 9/9 成功。unit は 3 ランタイムのディレクトリ・watcher・UDP close 契約も検証する。CI は YAML の構文と matrix 4 件を確認し、pin 済み toolchain の Node core/array wasm-gc smoke は 20/20 tests・1/1 invocation。GitHub 上の実行はしていない。
+
+初期測定では Deno fs 9/50、Bun fs 22/50、Deno socket と全 async はタイムアウト。修正後は完走する。socket の EPERM や stdin 待ちによるタイムアウトは今回の最終測定では発生していない。abort ケースの core dump による timeout は、差分テストの子プロセスで core dump を無効にして解消（SIGABRT の比較は維持）。
 
 ## テスト戦略
 

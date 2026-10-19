@@ -6,7 +6,7 @@
 |---|---|---|
 | D1 | 匿名 wasm 関数のフレーム `wasm://wasm/<hash>` のハッシュ値が異なる | V8 のバージョン差（moonrun は rusty_v8 0.106）。MoonBit の関数は名前付きなので通常は出ない |
 | D2 | Suspending な import を使うモジュールは JSPI の副スタックで走るため、再帰の上限が本家より深い | JSPI の仕様。`--stack-size` は副スタックにも適用する |
-| D3 | Bun（JSC）では trap の文言とスタックの形が V8 と異なる（フレームのオフセットが取れない） | エンジン差。Bun は L2 互換 |
+| D3 | Bun 1.4.2（JSC）は wasm フレームの名前・関数番号・オフセットを公開せず、`at unknown` だけを返す。ソース位置・memory-sanitizer の allocation stack を復元できず、LinkError 等のエンジン文言も V8 と異なる。`unreachable` の文言は合わせている | エンジン差。stderr の比較ではフレーム名・位置とエンジン文言の正規化が必要。ただし core の例外検査や test-driver の失敗文は **stdout** にスタックを含むため、stderr だけを正規化する L2 にも届かない（両 target とも 90/131 invocation 一致、全テストの合否は一致）。stdout を削る正規化は行わない |
 | D4 | WASI のパス引数（`path_open` 等）が UTF-8 として不正なバイト列のとき、U+FFFD に置き換えたパスで OS を呼ぶ（本家は Unix で生バイトのまま渡す）。`fd_readdir`・`path_readlink` が返す名前は生バイトで一致 | ホストのパスを文字列で扱うため。MoonBit の String 由来のパスは常に UTF-8 |
 | D5 | `--version` と `--help` は moonrun-js として名乗る（`moonrun-js <版> (compat moonrun …)`） | 別実装であることを隠さない。`moon version --all` は出力をそのまま表示するだけなので影響なし |
 | D6 | `wasm:js-string` builtin の中で trap したとき、本家のスタックには builtin のフレーム（例 `at fromCodePoint`）が 1 行多い | V8 のバージョン差。新しい V8 は builtin をインライン化してフレームを出さない |
@@ -34,3 +34,18 @@
 | D29 | `open_pid_handle` は Run が spawn した子に対して pidfd 相当のハンドルを返す。それ以外の存在する pid は invalid handle（errno 0）で waitpid ジョブにフォールバックするが、ホストの別コードが作った子は待てない | Node は任意 pid の pidfd / waitpid を公開しない |
 | D30 | spawn の stdio に kernel socket / inotify / process / Completion Source を渡すと `EINVAL`。kernel pipe、stdio、開いたファイルは対応する | Node に手渡すホスト fd が無い資源は、パイプ以外中継していない |
 | D31 | SQLite のロックは同じ Run の接続間でのみ有効。別プロセス・別 Run と同時に同じデータベースへ書く用途は非対応 | Node に POSIX record lock が無い。SQLite 3.53.2 自体と、同期 VFS・Run 内ロック表を使用する |
+| D32 | Deno 2.9.7 の `opendir` は `encoding: 'buffer'` でも名前を文字列で返し、不正 UTF-8 の名前は U+FFFD に変わる。legacy の `read_dir` でも本家の「不正 UTF-8 を飛ばす」と異なりうる | opendir が生バイトを渡さず、readdir(buffer) も置換後の UTF-8 を返す（名前 0xff → ef bf bd を実測）。Bun の「Dirent でなく Buffer が返る」差はホスト層で吸収済み。通常の UTF-8 名は一致 |
+| D33 | Deno 2.9.7 / Bun 1.4.2 の `setMulticastTTL(0)` は IPv4/IPv6 とも `EINVAL`（Linux は 0 を許す）。async の `multicast_test.mbt` index 3 が失敗する | ランタイムの node:dgram が 1..255 に制限する。成功したふりや TTL=1 への置き換えはしない |
+| D34 | Deno 2.9.7 の接続済み UDP の `address()` は、peer が loopback でもローカル IP を `0.0.0.0` と返す（送信元は実際には `127.0.0.1`）。`getsockname_test.mbt` index 1 が失敗する | Deno の UDP connect は実ソケットの connect ではなく宛先を保持する実装。公開 API から実際の経路選択後のローカル IP を取得できず、peer から推測しない |
+| D35 | Deno 2.9.7 では UDP の send を直後の setsockopt が追い越す。multicast loopback を無効にする前の送信も届かず、`multicast_test.mbt` index 2 / 4 が失敗する | node:dgram の送信は非同期で、Linux の同期 send/setsockopt の順序を表せない。close については送信 callback まで待つことでデータ消失を修正済み。setsockopt を無条件に成功扱いして遅延することはしない |
+| D36 | Deno 2.9.7 の node:net listener は `ipv6Only: true` でも IPv4-mapped 接続を受け入れる。`dual_stack_test.mbt` index 1 が失敗する | ランタイムの listen 実装の制約。受け入れた後に切断しても connect 時の `ECONNREFUSED` と同じにはならない |
+| D37 | Bun 1.4.2 の native `wasm:js-string.equals("hello", null)` が 0 でなく `RuntimeError: Illegal argument` を返す。`backends/js-string-builtins` が exit 1 になる | native builtin の挙動で、解決済み import は JS から上書きできない。native builtins を全面無効にすると GC array 用 builtin を実装できず、別の正常な wasm を壊すため回避しない |
+| D38 | Deno に `fromCompiled` で外部の `WebAssembly.Module` だけを渡した場合、匿名フレームの関数番号が常に 0 のままになる。bytes 経由の `compileBytes` と CLI ではコード位置から正しい番号に復元する | Module API は code section を取り出せない。名前付きフレームは影響なし。D1 のハッシュ差は別途残る |
+| D39 | Deno 2.9.7 の ctime は秒単位（`stat` / `fstat` の `ctimeNs` 下 9 桁が 0）。mtime / atime も ns でなく ms 精度。`timestamp_test.mbt` index 0 の「600ms 後の ctime 差が 500ms 超」は秒境界によって失敗する | node:fs と Deno.stat の両方で確認。ホスト API に無い精度を時刻の推測で補わない |
+
+P6 の測定上の注意:
+
+- D12 の並行順序は、async/shell が起動する複数の `moon build` の stderr にも現れる。本家同士でも duplicate-import warning の断片が混ざる。`--refresh-ref` でビルドキャッシュ由来の `ran N tasks` は除けるが、断片の混在はなお変動する。**これをホストの不具合や L3 達成とは数えず**、raw stderr の不一致として報告する。warning の削除・無条件の stderr 正規化はしていない。
+- Deno の watcher は inode ごとに共有し、`/proc/self/fd` 経由で監視する。移動時には現在のパスで再登録する（D17）。再登録の隙間の通知までは保証できない。既存の async/fs 50 テストと rename 後の子エントリ変更の回帰テストは一致する。
+- D17 の通知の遅延・合流によって、Deno の watcher テストの 150ms ごとの観測は変動する（同じ修正後に fs は 44〜50/50 を観測）。単独の成功例だけで L3 達成とは判断しない。D39 の ctime もテスト成功数を変動させる。
+- suite の旧 43 invocation は、外側の 27 wasm 呼び出しに子 runner の記録が混ざった値。同じ argv・異なる stdin の子の記録を上書きし、キャンセルのタイミングでも件数が変わっていた。P6 では外側の 27 呼び出しだけを比較する。子の観測可能な出力は親の stdout/stderr とゲストの検査に含まれ、比較対象から消えていない。

@@ -11,22 +11,14 @@ function captureGuestStack(): string[] {
   Error.stackTraceLimit = STACK_FRAMES + 16;
   const stack = new Error().stack ?? '';
   Error.stackTraceLimit = limit;
-  const frames = stack
+  return stack
     .split('\n')
     .slice(1)
-    .map((line) => line.trim().replace(/^at /, ''));
-  // Host frames above the guest do not exist in moonrun (its callbacks are native).
-  const firstGuest = frames.findIndex((f) => f.includes('wasm://'));
-  if (firstGuest < 0) {
-    return [];
-  }
-  return frames
-    .slice(firstGuest, firstGuest + STACK_FRAMES)
-    .filter((f) => f.includes('wasm://'))
-    .map((f) => {
-      const open = f.lastIndexOf(' (');
-      return f.endsWith(')') && open >= 0 ? f.slice(0, open) : '<anonymous>';
-    });
+    .flatMap((line) => {
+      const frame = guestFrame(line);
+      return frame === undefined ? [] : [frame.name];
+    })
+    .slice(0, STACK_FRAMES);
 }
 
 function failure(name: string, message: string): Error {
@@ -61,3 +53,5 @@ export const memorySanitizer: ImportFamily = (ctx) => {
 };
 
 export const MEMORY_SANITIZER_MODULE = MODULE;
+
+import { guestFrame } from '../../diagnostics/stack.ts';

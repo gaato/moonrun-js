@@ -22,6 +22,8 @@ import { checkoutUpstream } from './upstream.ts';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const cache = path.join(repoRoot, '.cache');
 const home = process.env['HOME'] ?? '';
+const reference =
+  process.env['MOONRUN_REFERENCE'] ?? path.join(home, '.moonup/toolchains/latest/bin/moonrun');
 
 const argv = process.argv.slice(2);
 const suite = argv[0];
@@ -62,7 +64,7 @@ function checkout(): string {
   if (suite === 'core') {
     // The core bundled with the toolchain matches the installed moonc.
     if (!existsSync(dir)) {
-      cpSync(path.join(home, '.moonup/toolchains/latest/lib/core'), dir, {
+      cpSync(path.resolve(path.dirname(reference), '../lib/core'), dir, {
         recursive: true,
         filter: (src) => !src.includes(`${path.sep}_build`),
       });
@@ -112,7 +114,11 @@ function record(project: string, runner: string, out: string, build: string): vo
 function load(dir: string): Map<string, Record> {
   const map = new Map<string, Record>();
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
-    map.set(f, JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as Record);
+    const record = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as Record;
+    // Also accept older reference directories which captured nested children.
+    if (record.argv.some((arg) => arg.startsWith('<build>/'))) {
+      map.set(JSON.stringify(record.argv), record);
+    }
   }
   return map;
 }
@@ -155,8 +161,6 @@ const refDir = path.join(cache, 'records', `${key}.ref`);
 const jsDir = path.join(cache, 'records', `${key}.${runtime}`);
 if (refreshRef || !existsSync(refDir)) {
   // The toolchain binary, not ~/.moon/bin/moonrun: the moonup shim adds variables to the child env.
-  const reference =
-    process.env['MOONRUN_REFERENCE'] ?? path.join(home, '.moonup/toolchains/latest/bin/moonrun');
   record(project, reference, refDir, path.join(cache, 'build', key, 'ref'));
 }
 // A separate target dir keeps moon from reusing cached test results of the other runner.

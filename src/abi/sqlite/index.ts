@@ -1,25 +1,29 @@
-import {
-  attempt,
-  fault,
-  type SqliteError,
-  SqliteHost,
-  SqliteWork,
-} from '../../domains/sqlite/host.ts';
+import { type SqliteError, SqliteHost, SqliteWork } from '../../domains/sqlite/host.ts';
 import { SQLITE_IMPORTS } from '../../generated/sqlite-imports.ts';
 import { asHandle, canonical, NULL_HANDLE } from '../../kernel/handles.ts';
 import type { Result } from '../../ports/result.ts';
 import type { ImportFamily } from '../context.ts';
-import { fn, type ImportDef, type JsArgs, type ValType } from '../define.ts';
+import {
+  fn,
+  type GeneratedHandlers,
+  type ImportDef,
+  type JsArgs,
+  type ValType,
+} from '../define.ts';
 import { GuestFault } from '../memory.ts';
 
 type Table = typeof SQLITE_IMPORTS;
-type Js<T> = T extends 'u64' | 'i64' ? bigint : T extends 'void' ? void : number;
-type Args<P> = {
-  -readonly [I in keyof P]: P[I] extends readonly [string, infer T] ? Js<T> : never;
-};
-type Handlers = {
-  [K in keyof Table]: (...args: Args<Table[K]['params']>) => Js<Table[K]['result']>;
-};
+class Failure extends Error {
+  readonly reason: SqliteError;
+  constructor(reason: SqliteError) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
+function fault(reason: SqliteError = 'Fault'): never {
+  throw new Failure(reason);
+}
 
 export const sqlite: ImportFamily = (ctx) => {
   const module = ctx.host.components.sqliteEngine();
@@ -212,7 +216,7 @@ export const sqlite: ImportFamily = (ctx) => {
       m.setU32(out + 12, r.changes === undefined ? 0 : 1);
       m.setI64(out + 16, r.changes ?? 0n);
     },
-  } satisfies Handlers;
+  } satisfies GeneratedHandlers<Table>;
   const imports: Record<string, ImportDef> = {};
   for (const symbol of Object.keys(SQLITE_IMPORTS) as (keyof Table)[]) {
     const entry = SQLITE_IMPORTS[symbol];
@@ -220,10 +224,10 @@ export const sqlite: ImportFamily = (ctx) => {
     const impl = handlers[symbol] as (...args: unknown[]) => unknown;
     const guarded = (...args: unknown[]): unknown => {
       try {
-        const r = attempt(() => impl(...args));
-        if (!r.ok) throw new Error(`moonbitlang/sqlite.${symbol} failed: ${r.error}`);
-        return r.value;
+        return impl(...args);
       } catch (e) {
+        if (e instanceof Failure)
+          throw new Error(`moonbitlang/sqlite.${symbol} failed: ${e.reason}`);
         if (e instanceof GuestFault) throw new Error(`moonbitlang/sqlite.${symbol} failed: Fault`);
         throw e;
       }
