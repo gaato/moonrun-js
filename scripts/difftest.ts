@@ -57,7 +57,6 @@ const DEFAULT_PENDING = [
   'sqlite',
   'policy',
   'stack-size',
-  'memsan', // implemented but not wired into the CLI yet
 ];
 
 interface MoonSpec {

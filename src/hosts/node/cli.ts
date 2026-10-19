@@ -9,6 +9,8 @@ const COMPAT = 'compat moonrun 0.1.20261012 748b63c';
 
 interface Command {
   readonly path: string;
+  /** Index of the path in argv, to recover its raw bytes. */
+  readonly pathIndex: number;
   readonly args: string[];
   readonly noStackTrace: boolean;
   readonly testArgs: string | undefined;
@@ -24,6 +26,7 @@ const VALUE_FLAGS = new Set(['--test-args', '--stack-size', '--policy', '--polic
 /** Mirrors moonrun's clap definition: flags may appear before `--`, args allow hyphen values. */
 function parse(argv: readonly string[]): Command | 'version' | 'help' {
   let filePath: string | undefined;
+  let pathIndex = -1;
   const args: string[] = [];
   const values = new Map<string, string>();
   let noStackTrace = false;
@@ -60,6 +63,7 @@ function parse(argv: readonly string[]): Command | 'version' | 'help' {
         throw new UsageError(`unexpected argument '${a}' found`);
       }
       filePath = a;
+      pathIndex = i;
     } else {
       args.push(a);
     }
@@ -73,6 +77,7 @@ function parse(argv: readonly string[]): Command | 'version' | 'help' {
   }
   return {
     path: filePath,
+    pathIndex,
     args,
     noStackTrace,
     testArgs: values.get('--test-args'),
@@ -109,6 +114,47 @@ function fail(chain: readonly string[]): never {
   process.exit(1);
 }
 
+/**
+ * Raw argv bytes after the script, from /proc/self/cmdline: `process.argv` replaces
+ * invalid UTF-8 with U+FFFD, but moonrun opens the module path as raw bytes.
+ */
+function rawArgs(count: number): Buffer[] | undefined {
+  try {
+    const parts = readFileSync('/proc/self/cmdline').subarray(0, -1);
+    const all: Buffer[] = [];
+    let start = 0;
+    for (let i = 0; i <= parts.length; i++) {
+      if (i === parts.length || parts[i] === 0) {
+        all.push(parts.subarray(start, i));
+        start = i + 1;
+      }
+    }
+    return all.length >= count ? all.slice(all.length - count) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Rust `std::path::absolute` on Unix: joins the cwd but keeps `..` (no normalization beyond `.` and repeated `/`). */
+function rustAbsolute(raw: Buffer): Uint8Array {
+  const joined =
+    raw[0] === 0x2f ? raw : Buffer.concat([Buffer.from(process.cwd()), Buffer.from('/'), raw]);
+  const parts: Buffer[] = [];
+  let start = 0;
+  for (let i = 0; i <= joined.length; i++) {
+    if (i === joined.length || joined[i] === 0x2f) {
+      const part = joined.subarray(start, i);
+      if (part.length > 0 && !(part.length === 1 && part[0] === 0x2e)) {
+        parts.push(part);
+      }
+      start = i + 1;
+    }
+  }
+  const trailing =
+    joined.length > 1 && joined[joined.length - 1] === 0x2f ? [Buffer.from('/')] : [];
+  return Buffer.concat(parts.flatMap((p) => [Buffer.from('/'), p]).concat(trailing));
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   let command: ReturnType<typeof parse>;
   try {
@@ -130,7 +176,8 @@ async function main(argv: readonly string[]): Promise<number> {
     process.stdout.write('Usage: moonrun-js [OPTIONS] <PATH> [ARGS]...\n');
     return 0;
   }
-  if (!existsSync(command.path)) {
+  const rawPath = rawArgs(argv.length)?.[command.pathIndex] ?? Buffer.from(command.path);
+  if (!existsSync(rawPath)) {
     fail(['no such file']);
   }
   if (path.extname(command.path) !== '.wasm') {
@@ -144,7 +191,7 @@ async function main(argv: readonly string[]): Promise<number> {
       fail([e instanceof Error ? e.message : String(e)]);
     }
   }
-  const bytes = new Uint8Array(readFileSync(command.path));
+  const bytes = new Uint8Array(readFileSync(rawPath));
   const loaded = compileBytes(bytes, command.path, {
     readText: (p) => {
       try {
@@ -159,7 +206,7 @@ async function main(argv: readonly string[]): Promise<number> {
   if (!loaded.ok) {
     fail(loaded.error.chain);
   }
-  const host = nodeHost({ currentExe: path.resolve(command.path) });
+  const host = nodeHost({ currentExe: rustAbsolute(rawPath) });
   const outcome: RunOutcome = await run(loaded.value, host, {
     args: command.args,
     testArgs,

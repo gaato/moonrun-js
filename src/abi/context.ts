@@ -19,6 +19,11 @@ export interface RunContext {
   readonly args: readonly string[];
   /** Registers a cleanup (e.g. closing host fds) that runs once when the run ends. */
   onTeardown(cleanup: () => void): void;
+  /**
+   * Registers a check that runs only when the run completes normally; a returned
+   * message turns the outcome into a host failure (moonrun's memory-sanitizer leak check).
+   */
+  onCompleted(check: () => string | undefined): void;
 }
 
 /** A family builds the imports of one wasm import module for a run. */

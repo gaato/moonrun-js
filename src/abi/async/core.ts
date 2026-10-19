@@ -2,7 +2,19 @@ import { NULL_HANDLE } from '../../kernel/handles.ts';
 import type { ImportFamily } from '../context.ts';
 import { fn } from '../define.ts';
 import { LINUX_ERRNO } from '../errno.ts';
-import { cString } from './guest-data.ts';
+
+/** Bytes as one char per byte, so path splitting on `/` works on non-UTF-8 paths. */
+function latin1(bytes: Uint8Array): string {
+  let s = '';
+  for (const b of bytes) {
+    s += String.fromCharCode(b);
+  }
+  return s;
+}
+
+function fromLatin1(s: string): Uint8Array {
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
 
 /** Rust `Path::parent` for an absolute Unix path; `undefined` for `/`. */
 export function parentPath(path: string): string | undefined {
@@ -24,19 +36,22 @@ export function parentPath(path: string): string | undefined {
  */
 export const moonbitlangCore: ImportFamily = (ctx) => {
   const kernel = ctx.asyncKernel;
-  const pathHandle = (path: string | undefined): bigint => {
+  const pathHandle = (path: Uint8Array | undefined): bigint => {
     if (path === undefined) {
       kernel.errno = LINUX_ERRNO.EINVAL;
       return NULL_HANDLE;
     }
-    return kernel.cBuffers.insert(cString(path));
+    const buffer = new Uint8Array(path.length + 1);
+    buffer.set(path);
+    return kernel.cBuffers.insert(buffer);
   };
-  const exe = (): string | undefined => ctx.host.platform.currentExe;
+  const exe = (): Uint8Array | undefined => ctx.host.platform.currentExe;
   return {
     'env/current_exe': fn([], 'u64', () => pathHandle(exe())),
     'env/current_exe_dir': fn([], 'u64', () => {
       const path = exe();
-      return pathHandle(path === undefined ? undefined : parentPath(path));
+      const parent = path === undefined ? undefined : parentPath(latin1(path));
+      return pathHandle(parent === undefined ? undefined : fromLatin1(parent));
     }),
   };
 };

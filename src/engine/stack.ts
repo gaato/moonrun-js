@@ -43,8 +43,15 @@ function isHostFrame(line: string): boolean {
     return true;
   }
   const open = frame.lastIndexOf(' (');
-  const location = frame.endsWith(')') && open >= 0 ? frame.slice(open + 2, -1) : frame;
-  return !location.startsWith('wasm://');
+  if (frame.endsWith(')') && open >= 0) {
+    return !frame.slice(open + 2, -1).startsWith('wasm://');
+  }
+  // A bare frame is a location (`file:///…:8:45`, `node:internal/…`). Lines such as an
+  // already-demangled `at @pkg.fn` inside an error message are not frames at all.
+  return (
+    !frame.startsWith('wasm://') &&
+    (frame.includes('://') || frame.startsWith('node:') || frame.startsWith('/'))
+  );
 }
 
 /** The exception's stack (or string form) as moonrun would see it. */

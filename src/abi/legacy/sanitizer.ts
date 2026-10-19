@@ -46,10 +46,11 @@ function failure(name: string, message: string): Error {
   return new Error(`${MODULE}.${name} failed: ${message}`);
 }
 
-/** Per-run sanitizer state; `leakReport` is checked only when the run completes normally. */
-export function createSanitizer(): { family: ImportFamily; leakReport: () => string | undefined } {
+/** `moonbit:ffi/memory-sanitizer`. Leaks are reported only when the run completes normally. */
+export const memorySanitizer: ImportFamily = (ctx) => {
   const live = new Map<number, LiveObject>();
-  const family: ImportFamily = () => ({
+  ctx.onCompleted(() => leakReport(live));
+  return {
     'register-object-alloc': fn(['u32', 'u32'], 'void', (size, ptr) => {
       const existing = live.get(ptr);
       if (existing !== undefined) {
@@ -66,21 +67,21 @@ export function createSanitizer(): { family: ImportFamily; leakReport: () => str
       }
     }),
     'object-is-valid': fn(['u32'], 'i32', (ptr) => (live.has(ptr) ? 1 : 0)),
-  });
-  const leakReport = (): string | undefined => {
-    if (live.size === 0) {
-      return undefined;
-    }
-    // moonrun keeps live objects in a BTreeMap, so the report is ordered by address.
-    const entries = [...live.entries()].sort(([a], [b]) => a - b);
-    const total = entries.reduce((sum, [, o]) => sum + o.size, 0);
-    let report = `moonrun memory sanitizer detected ${live.size} leaked object${live.size === 1 ? '' : 's'} (${total} bytes)`;
-    for (const [ptr, object] of entries) {
-      report += `\nleaked object ${ptr} (${object.size} bytes)${formatStack(object.stack, 'allocation stack')}`;
-    }
-    return report;
   };
-  return { family, leakReport };
+};
+
+function leakReport(live: ReadonlyMap<number, LiveObject>): string | undefined {
+  if (live.size === 0) {
+    return undefined;
+  }
+  // moonrun keeps live objects in a BTreeMap, so the report is ordered by address.
+  const entries = [...live.entries()].sort(([a], [b]) => a - b);
+  const total = entries.reduce((sum, [, o]) => sum + o.size, 0);
+  let report = `moonrun memory sanitizer detected ${live.size} leaked object${live.size === 1 ? '' : 's'} (${total} bytes)`;
+  for (const [ptr, object] of entries) {
+    report += `\nleaked object ${ptr} (${object.size} bytes)${formatStack(object.stack, 'allocation stack')}`;
+  }
+  return report;
 }
 
 export const MEMORY_SANITIZER_MODULE = MODULE;

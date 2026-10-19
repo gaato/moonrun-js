@@ -16,3 +16,4 @@
 | D10 | 待つ Job（sleep、ブロック中のパイプ I/O）への `thread_pool/run_job` はすぐ戻り、結果は Job が終わった時点で見えるようになる（本家はゲストのスレッドで完了まで待つ） | 同上。現行の moonbitlang/async は `run_job` を呼ばない |
 | D11 | パイプは 64KiB のバイト列 + `PIPE_BUF`（4096）原子性でモデル化しており、満杯付近の nonblocking write が受け付けるバイト数が Linux のページ単位の実装と異なりうる | 実装の単純化。`EAGAIN`/`EPIPE`/EOF と readiness の意味は同じ |
 | D12 | 同時に完了する Job・タイマーの観測順、およびシグナルと Job 完了が同時に保留中のときの `wait` のイベント数（本家は 2 つの fd、moonrun-js は 1 つの Completion Source）が異なりうる | タイミング依存。並行に走る async テストの結果行の順序は本家自身も実行ごとに変わる |
+| D13 | 値やキーが UTF-8 として不正な環境変数は U+FFFD に置き換えた文字列として見える（本家の `get_env_var` は空文字列を返し、`get_env_vars` はその項目を飛ばす） | Node の `process.env` が置換済みの文字列しか渡さないため |

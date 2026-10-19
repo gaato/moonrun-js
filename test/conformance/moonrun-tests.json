@@ -458,7 +458,8 @@
         "--test-args",
         "{\"package\":\"username/current_exe/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
         "non-utf8-\\xff/module-\\xfe.wasm"
-      ]
+      ],
+      "divergences": ["D13"]
     },
     {
       "id": "exit/guest-code-7",

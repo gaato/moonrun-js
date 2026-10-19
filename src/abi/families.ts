@@ -7,6 +7,7 @@ import { fsUnstable } from './legacy/fs-unstable.ts';
 import { io } from './legacy/io.ts';
 import { consoleLog, moonbit, spectest } from './legacy/print.ts';
 import { rand } from './legacy/rand.ts';
+import { MEMORY_SANITIZER_MODULE, memorySanitizer } from './legacy/sanitizer.ts';
 import { sys } from './legacy/sys.ts';
 import { time } from './legacy/time.ts';
 import { preview1 } from './wasi/preview1.ts';
@@ -20,6 +21,7 @@ export const FAMILIES: Readonly<Record<string, ImportFamily>> = {
   __moonbit_sys_unstable: sys,
   __moonbit_io_unstable: io,
   __moonbit_rand_unstable: rand,
+  [MEMORY_SANITIZER_MODULE]: memorySanitizer,
   __moonbit_fs_unstable: fsUnstable,
   exception,
   'ffi-bytes': ffiBytes,

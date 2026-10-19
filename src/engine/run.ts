@@ -73,6 +73,7 @@ export async function run(
   const stdio = new Stdio(host.stdio);
   const termination = new TerminationCell();
   const cleanups: (() => void)[] = [];
+  const completionChecks: (() => string | undefined)[] = [];
   const asyncKernel = createAsyncKernel(host);
   cleanups.push(() => asyncKernel.teardown());
   const ctx: RunContext = {
@@ -84,6 +85,9 @@ export async function run(
     asyncKernel,
     moduleName: loaded.name,
     args: options.args,
+    onCompleted: (check) => {
+      completionChecks.push(check);
+    },
     onTeardown: (cleanup) => {
       cleanups.push(cleanup);
     },
@@ -145,7 +149,7 @@ export async function run(
     }
   };
 
-  try {
+  const execute = async (): Promise<RunOutcome> => {
     let instance: WebAssembly.Instance;
     try {
       instance = new WebAssembly.Instance(loaded.module, imports);
@@ -201,6 +205,20 @@ export async function run(
       return { kind: 'completed' };
     }
     return finish(await call(start, []), undefined);
+  };
+
+  try {
+    const outcome = await execute();
+    if (outcome.kind !== 'completed') {
+      return outcome;
+    }
+    for (const check of completionChecks) {
+      const failure = check();
+      if (failure !== undefined) {
+        return hostFailure(failure);
+      }
+    }
+    return outcome;
   } finally {
     stdio.flushStdout();
     for (const cleanup of cleanups) {

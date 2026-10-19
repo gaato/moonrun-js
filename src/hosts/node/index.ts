@@ -6,7 +6,7 @@ import { nodeStdio } from './stdio.ts';
 
 export interface NodeHostOptions {
   /** Absolute path of the wasm file, for `current_exe`. */
-  readonly currentExe?: string | undefined;
+  readonly currentExe?: Uint8Array | undefined;
   /** Working directory for relative paths and the WASI preopen; defaults to `process.cwd()`. */
   readonly cwd?: string | undefined;
 }
