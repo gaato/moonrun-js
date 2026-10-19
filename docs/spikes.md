@@ -42,8 +42,13 @@
 - 罠: ring の wasm32-unknown 向け RNG と rustls-pki-types の `UnixTime::now()` に 1 行パッチが要る（`[patch.crates-io]`）。`wasm-opt --all-features` は Node が読めない符号化を出すので `--enable-*` を列挙する。`#[link(wasm_import_module = "env")]` が必要。
 - P4 の課題: パッチを減らす（rustls の `CryptoProvider.secure_random` 差し替え等で回避できるか確認）。
 
-## S8 SQLite
-- P5 に後回し。
+## S8 SQLite（2026-10-19）
+- moonrun は libsqlite3-sys 0.38.2 の bundled（SQLite 3.53.2）を、`THREADSAFE=1`・`DEFAULT_FOREIGN_KEYS=1`・FTS3/FTS5/JSON1/RTREE/STAT4 などでビルドしている。
+- `@sqlite.org/sqlite-wasm` 3.53.4 は不採用: `OMIT_UTF16`（`prepare16_v2`・`column_text16`・`errmsg16` が無い）、mutex なし、`foreign_keys` 既定 0 など、ゲストから見える設定が違う。
+- **採用: 自前ビルド**。SQLite 3.53.2 の amalgamation を本家と同じフラグ（load extension を除く）で clang 23 + `/usr/share/wasi-sysroot` の libc から wasm にリンクし、WASI import は無し。OS 境界は `host.*` の 16 関数（open/read/write/truncate/fsync/size/access/unlink/getcwd/lock/unlock/reserved/random/now_ms/sleep_us）で、`SQLITE_OS_OTHER` の VFS（約 100 行の C）が使う。
+- 試作で確認: prepare16/text16/column_name16、エラー文言（`errmsg16`・errcode・extended）が本家と一致、読み取り専用での書き込み拒否、同一プロセス内の 2 接続で BUSY。`-Oz` + `wasm-opt -Oz` で 893KB（gzip 404KB）。
+- 差: Node に flock/fcntl が無いため、別プロセス間のファイルロックは効かない（同一プロセス内はロック表で再現）。
+- async ジョブは moonrun 側もスレッドプールの汎用ジョブなので、カーネルの Worker で完了まで実行すればよい。
 
 ## 確定判断への影響
 - JSPI 前提・Linux 振る舞い・TLS 方式・コード生成方針は変更なし。
