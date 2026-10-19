@@ -2,6 +2,21 @@
   "name": "moonrun-js",
   "version": "0.0.0",
   "description": "A TypeScript implementation of MoonBit's moonrun for JavaScript runtimes",
+  "keywords": [
+    "moonbit",
+    "moonrun",
+    "wasm",
+    "webassembly",
+    "wasi",
+    "jspi"
+  ],
+  "author": "Gakuto Furuya <g.furuya@gaato.net>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gaato/moonrun-js.git"
+  },
+  "homepage": "https://github.com/gaato/moonrun-js#readme",
+  "bugs": "https://github.com/gaato/moonrun-js/issues",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -17,7 +32,8 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin/moonrun-js",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsdown",

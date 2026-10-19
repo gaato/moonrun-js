@@ -1,0 +1,62 @@
+# moonrun-js
+
+A TypeScript reimplementation of [MoonBit](https://www.moonbitlang.com/)'s `moonrun`, the
+wasm runner bundled with the MoonBit toolchain. Programs built with `moon build --target wasm`
+or `--target wasm-gc` that run under `moonrun` run on Node.js, Deno and Bun, including programs
+that use `moonbitlang/async` (files, processes, signals, TCP/UDP, DNS, TLS) and
+`moonbitlang/sqlite`.
+
+The yardstick is the real `moonrun` 0.1.20261012 (moon `748b63c`): the same wasm should
+produce the same stdout, stderr and exit status. Known differences are listed with IDs in
+[docs/divergences.md](docs/divergences.md).
+
+## Usage
+
+```sh
+npx moonrun-js program.wasm -- arg1 arg2
+```
+
+The arguments follow `moonrun`: `[--test-args JSON] [--policy FILE [--policy-source-dir DIR]]
+[--no-stack-trace] <wasm> [-- args...]`.
+
+`moon` can use it in place of `moonrun`:
+
+```sh
+MOONRUN_OVERRIDE=$(command -v moonrun-js) moon test --target wasm
+```
+
+## Runtimes
+
+| Runtime | Status |
+|---|---|
+| Node.js ≥ 24 | Matches `moonrun` on the moonbitlang/core and moonbitlang/async test suites |
+| Deno | Matches on core; a few socket and timestamp cases differ (D33–D36, D39) |
+| Bun | Same test results and exit status; stack traces carry no wasm frame names (D3) |
+
+JSPI (`WebAssembly.Suspending`), Wasm GC and exception handling are required. Run on Deno
+with `deno run -A npm:moonrun-js` and on Bun with `bun --bun x moonrun-js`.
+
+moonrun-js always behaves as Linux (errno values, `stat` layout, platform queries). Parts of
+moonrun's own Rust source (sandbox policy, filesystem checks, diagnostics, argument parsing)
+are compiled to wasm and shipped with the package, as are a rustls TLS engine and SQLite
+3.53.2. No native addons are used.
+
+## Library
+
+`moonrun-js` exports `compileBytes` and `run`, and `moonrun-js/node` exports `nodeHost`. This
+API is not stable yet.
+
+## Development
+
+See [AGENTS.md](AGENTS.md) and [docs/plan.md](docs/plan.md). After cloning:
+
+```sh
+git submodule update --init --depth 1
+mise install
+pnpm install
+pnpm typecheck && pnpm lint && pnpm test
+```
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
