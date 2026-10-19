@@ -1,0 +1,38 @@
+{
+  "name": "moonrun-js",
+  "version": "0.0.0",
+  "description": "A TypeScript implementation of MoonBit's moonrun for JavaScript runtimes",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "bin": {
+    "moonrun-js": "./bin/moonrun-js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./node": "./dist/hosts/node/index.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check . && node scripts/check-layers.ts",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "gen": "node scripts/gen-imports.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "^24.19.2",
+    "fast-check": "4.10.2",
+    "tsdown": "0.23.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

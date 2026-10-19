@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// Runs the built CLI when present, otherwise the TypeScript sources (development).
+import { existsSync } from 'node:fs';
+
+const dist = new URL('../dist/hosts/node/cli.js', import.meta.url);
+await import(existsSync(dist) ? dist.href : new URL('../src/hosts/node/cli.ts', import.meta.url).href);
