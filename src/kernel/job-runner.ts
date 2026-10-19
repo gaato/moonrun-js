@@ -8,6 +8,7 @@ import { startFilesystemJob } from './fs-jobs.ts';
 import type { FilesystemPayload, Job } from './job.ts';
 import { startNetworkJob } from './net-jobs.ts';
 import type { PipeEnd } from './pipe.ts';
+import { type ProcessEnvironment, startProcessJob } from './process-jobs.ts';
 import type { Scheduler, Timer } from './scheduler.ts';
 import type { Socket } from './socket.ts';
 
@@ -28,6 +29,8 @@ export interface JobEnvironment {
    * before a Filesystem Job touches the host; `undefined` allows it.
    */
   authorize(payload: FilesystemPayload): AsyncError | undefined;
+  /** Child processes, their policy and the bridges of their streams. */
+  readonly processes: ProcessEnvironment;
 }
 
 /** A started Job. `done` is called exactly once, possibly before `startJob` returns. */
@@ -70,6 +73,17 @@ export function startJob(job: Job, env: JobEnvironment, done: () => void): Execu
     case 'bind':
     case 'getaddrinfo':
       return startNetworkJob(job, payload, env.dns, done);
+    case 'spawn':
+    case 'wait-for-process':
+    case 'sigwait':
+      return startProcessJob(job, payload, env.processes, done);
+    case 'domain':
+      // A domain's work runs to completion; it cannot be interrupted (moonrun SQLite Jobs).
+      payload.work.start((ret) => {
+        job.succeed(ret);
+        done();
+      });
+      return FINISHED;
     default:
       return startFilesystemJob(job, payload, env, done);
   }
@@ -138,29 +152,32 @@ function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: (
       },
     );
   }
-  // Streams have no offset: pread/pwrite on a pipe or terminal fail with ESPIPE.
+  if (resource.kind === 'stdio' && payload.position >= 0n) {
+    // `pread` on the process stream: a regular file supports it, a pipe or terminal is ESPIPE.
+    const buffer = new Uint8Array(payload.len);
+    return fileIo(
+      job,
+      done,
+      () => env.files.async.read(resource.stream as HostFd, buffer, payload.position),
+      (n) => {
+        payload.result = buffer.subarray(0, n);
+      },
+    );
+  }
+  // Kernel streams have no offset: pread/pwrite on them fail with ESPIPE.
   if (payload.position >= 0n) {
     job.fail(native('ESPIPE'));
     done();
     return FINISHED;
   }
   switch (resource.kind) {
-    case 'stdio': {
+    case 'stdio':
       if (resource.stream !== 0) {
         job.fail(BADF);
-      } else {
-        const buffer = new Uint8Array(payload.len);
-        try {
-          const n = env.stdio.readStdin(buffer);
-          payload.result = buffer.subarray(0, n);
-          job.succeed(n);
-        } catch (e) {
-          job.fail(thrownError(e));
-        }
+        done();
+        return FINISHED;
       }
-      done();
-      return FINISHED;
-    }
+      return stdinRead(job, payload, env, done);
     case 'pipe':
       return pipeRead(job, payload, resource.end, done);
     case 'socket':
@@ -173,6 +190,7 @@ function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: (
         return r;
       });
     case 'inotify':
+    case 'process':
       job.fail(INVAL);
       done();
       return FINISHED;
@@ -182,6 +200,56 @@ function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: (
       done();
       return FINISHED;
   }
+}
+
+/** How long a nonblocking stdin without data waits before reading again (moonrun polls). */
+const STDIN_RETRY_MS = 5;
+
+/**
+ * `read_from_native_file` on fd 0: one `read` in the host's I/O pool, so the Run keeps going
+ * while stdin blocks. A nonblocking stdin without data (`EAGAIN`) is read again after a short
+ * wait, and only that wait can be interrupted (`EINTR`); a started read cannot, so a
+ * cancellation waits for it and the guest still receives its bytes (D7).
+ */
+function stdinRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: () => void) {
+  const buffer = new Uint8Array(payload.len);
+  let retry: Timer | undefined;
+  let finished = false;
+  const attempt = (): void => {
+    retry = undefined;
+    env.stdio.readStdinAsync(buffer).then(
+      (n) => {
+        payload.result = buffer.subarray(0, n);
+        job.succeed(n);
+        finished = true;
+        done();
+      },
+      (e: unknown) => {
+        const error = thrownError(e);
+        if (error.kind === 'native' && error.code === 'EAGAIN') {
+          retry = env.scheduler.setTimer(STDIN_RETRY_MS, attempt);
+          return;
+        }
+        job.fail(error);
+        finished = true;
+        done();
+      },
+    );
+  };
+  attempt();
+  return {
+    interrupt: () => {
+      if (finished || retry === undefined) {
+        return false;
+      }
+      retry.cancel();
+      retry = undefined;
+      finished = true;
+      job.fail(EINTR);
+      done();
+      return true;
+    },
+  };
 }
 
 /**
@@ -280,7 +348,13 @@ function streamWrite(job: Job, payload: WritePayload, env: JobEnvironment, done:
     const position = payload.position >= 0n ? payload.position : undefined;
     return fileIo(job, done, () => env.files.async.write(resource.file.fd, payload.data, position));
   }
-  // Streams have no offset: pread/pwrite on a pipe or terminal fail with ESPIPE.
+  if (resource.kind === 'stdio' && payload.position >= 0n) {
+    // `pwrite` on the process stream: a regular file supports it, a pipe or terminal is ESPIPE.
+    return fileIo(job, done, () =>
+      env.files.async.write(resource.stream as HostFd, payload.data, payload.position),
+    );
+  }
+  // Kernel streams have no offset: pread/pwrite on them fail with ESPIPE.
   if (payload.position >= 0n) {
     job.fail(native('ESPIPE'));
     done();
@@ -309,6 +383,7 @@ function streamWrite(job: Job, payload: WritePayload, env: JobEnvironment, done:
     case 'socket':
       return socketIo(job, resource.socket, done, (socket) => socket.write(payload.data));
     case 'inotify':
+    case 'process':
       job.fail(INVAL);
       done();
       return FINISHED;

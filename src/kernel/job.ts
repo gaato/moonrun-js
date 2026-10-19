@@ -1,7 +1,9 @@
 import type { AsyncError } from './errors.ts';
 import type { FileTimes, HostFile, StatValues } from './file.ts';
 import type { Handle } from './handles.ts';
+import type { Child } from './process.ts';
 import type { Resource } from './resource.ts';
+import type { SigwaitSink } from './signals.ts';
 
 /** A validated generic-stat request (moonrun `StatRequest`). */
 export interface StatRequest {
@@ -116,7 +118,51 @@ export type JobPayload =
       readonly position: bigint;
     }
   | FilesystemPayload
-  | NetworkPayload;
+  | NetworkPayload
+  | ProcessPayload
+  | DomainPayload;
+
+/**
+ * Work a domain supplies (moonrun's SQLite `Job`). The kernel schedules it like any Job;
+ * the domain owns its inputs, results and their release.
+ */
+export interface DomainWork {
+  /** Runs on a Worker; `finish(ret)` is called once, possibly before `start` returns. */
+  start(finish: (ret: number) => void): void;
+  /** The Job left the table (freed, or finished after it was freed). */
+  release(): void;
+}
+
+/** A Job whose `ret` is a domain status and whose results stay in `work`. */
+export type DomainPayload = { readonly kind: 'domain'; readonly work: DomainWork };
+
+/** A spawn Job's child until `spawn_job_get_result_handle` publishes it as a pidfd handle. */
+export type SpawnResult =
+  | { readonly state: 'unpublished'; readonly child: Child }
+  | { readonly state: 'published'; readonly handle: Handle };
+
+/** Process Jobs (moonrun `process::Job`) and the compat sigwait Job. */
+export type ProcessPayload =
+  | {
+      readonly kind: 'spawn';
+      readonly program: string;
+      /** argv[0] included. */
+      readonly argv: readonly string[];
+      readonly env: readonly string[];
+      /** stdin, stdout, stderr; `undefined` keeps the parent's stream. */
+      readonly stdio: readonly [Resource | undefined, Resource | undefined, Resource | undefined];
+      cwd: string | undefined;
+      result: SpawnResult | undefined;
+    }
+  | {
+      readonly kind: 'wait-for-process';
+      /** The pidfd, or `undefined` for a `waitpid` on the pid. */
+      readonly resource: Resource | undefined;
+      /** The pid the policy tracked for the handle (host-derived, never from the guest). */
+      readonly trackedPid: number | undefined;
+      readonly pid: number;
+    }
+  | { readonly kind: 'sigwait'; readonly sink: SigwaitSink };
 
 /** Network Jobs (moonrun `network::Job`). */
 export type NetworkPayload =

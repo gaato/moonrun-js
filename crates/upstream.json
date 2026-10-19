@@ -117,6 +117,13 @@
       }
     },
     {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/sqlite/policy.rs",
+      "rewrites": {
+        "std-fs": 5
+      }
+    },
+    {
       "crate": "moonrun-cli",
       "path": "crates/moonrun/src/main.rs",
       "rewrites": {},

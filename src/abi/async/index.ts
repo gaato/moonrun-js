@@ -1,6 +1,7 @@
 import { AsyncKernel, type AsyncKernelOptions, type FdKind } from '../../kernel/async-kernel.ts';
 import { type AsyncError, native } from '../../kernel/errors.ts';
 import { fdKindOfMode } from '../../kernel/file.ts';
+import type { ProcessOptions } from '../../kernel/processes.ts';
 import type { StdioStream } from '../../kernel/resource.ts';
 import { GlobalScheduler } from '../../kernel/scheduler.ts';
 import type { HostFd } from '../../ports/files.ts';
@@ -17,22 +18,29 @@ import { fsHelpers } from './fs-helpers.ts';
 import { io } from './io.ts';
 import { osError } from './os-error.ts';
 import { osString } from './os-string.ts';
-import { processes, tls } from './pending.ts';
+import { processes } from './process.ts';
 import { processEnv } from './process-env.ts';
 import { sockets } from './socket.ts';
 import { threadPool } from './thread-pool.ts';
+import { tls } from './tls.ts';
 import type { AsyncHandlers, ImplementedSymbol } from './types.ts';
 
 /** The `--policy` checks of the Async Host (absent: everything is allowed). */
 export type PolicySeams = Pick<
   AsyncKernelOptions,
   'authorizeFilesystem' | 'authorizeNetwork' | 'recordResolved'
->;
+> & {
+  /** Spawn rule, child provenance and moonx inheritance (`HostProcess`). */
+  readonly process?: Omit<ProcessOptions, 'port'>;
+};
 
 /** The Async Host of a run, over the host's stdio and the global event loop. */
 export function createAsyncKernel(host: Host, policy: PolicySeams = {}): AsyncKernel {
+  const { process, ...seams } = policy;
   return new AsyncKernel({
-    ...policy,
+    ...seams,
+    process: { ...process, port: host.process },
+    osSignals: host.signals,
     stdio: host.stdio,
     scheduler: new GlobalScheduler(),
     files: host.files,
@@ -66,8 +74,8 @@ export function asyncHandlerGroups(env: AsyncEnv) {
     fsHelpers(env),
     filesystem(env),
     sockets(env),
-    tls,
-    processes,
+    tls(env),
+    processes(env),
   ] as const;
 }
 

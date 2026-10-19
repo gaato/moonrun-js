@@ -1,0 +1,54 @@
+{
+  "wasms": {
+    "kbbi": { "prebuild": "gaato/kbbi@0.1.6/cmd/kbbi/kbbi.wasm" },
+    "discord-cli": { "prebuild": "gaato/discord-cli@0.1.5/discord-cli.wasm" },
+    "web-fetch": { "prebuild": "tonyfettes/skills-web-fetch@0.2.0/skills-web-fetch.wasm" }
+  },
+  "cases": [
+    {
+      "id": "skills/kbbi-lookup",
+      "area": "network-live",
+      "note": "HTTPS to kbbi.kemendikdasmen.go.id with system roots",
+      "wasm": "kbbi",
+      "argv": ["<wasm>", "--", "rumah"],
+      "timeoutMs": 90000
+    },
+    {
+      "id": "skills/kbbi-help",
+      "area": "network-live",
+      "wasm": "kbbi",
+      "argv": ["<wasm>", "--", "--help"]
+    },
+    {
+      "id": "skills/discord-cli-help",
+      "area": "network-live",
+      "wasm": "discord-cli",
+      "argv": ["<wasm>", "--", "--help"]
+    },
+    {
+      "id": "skills/discord-cli-no-token",
+      "area": "network-live",
+      "wasm": "discord-cli",
+      "unsetEnv": ["DISCORD_TOKEN"],
+      "argv": ["<wasm>", "--", "me"]
+    },
+    {
+      "id": "skills/discord-cli-unauthorized",
+      "area": "network-live",
+      "note": "HTTPS to discord.com; the API answers 401 for an invalid token",
+      "wasm": "discord-cli",
+      "unsetEnv": ["DISCORD_TOKEN"],
+      "argv": ["<wasm>", "--", "--token", "invalid", "me"],
+      "timeoutMs": 90000
+    },
+    {
+      "id": "skills/web-fetch-example",
+      "area": "network-live",
+      "requires": ["signals"],
+      "note": "starts the legacy sigwait Job (thread_pool/make_sigwait_job) before fetching",
+      "wasm": "web-fetch",
+      "argv": ["<wasm>", "--", "https://example.com"],
+      "timeoutMs": 90000
+    }
+  ]
+}

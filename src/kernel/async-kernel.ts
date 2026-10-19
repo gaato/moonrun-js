@@ -1,5 +1,6 @@
 import type { FilePort, HostFd } from '../ports/files.ts';
 import type { DnsPort, NetPort } from '../ports/net.ts';
+import type { ProcessPort, SignalPort } from '../ports/process.ts';
 import { err, type HostErrorCode, ok, type Result } from '../ports/result.ts';
 import type { StdioPort } from '../ports/stdio.ts';
 import { CBuffers } from './c-buffers.ts';
@@ -23,6 +24,9 @@ import type { FilesystemPayload, JobPayload } from './job.ts';
 import { KernelNetwork, type NetworkRequest } from './network.ts';
 import { makePipe } from './pipe.ts';
 import { Poller } from './poller.ts';
+import { Children, ProcessInputs } from './process.ts';
+import type { ProcessEnvironment } from './process-jobs.ts';
+import { KernelProcesses, type ProcessOptions } from './processes.ts';
 import { EPOLLIN, EPOLLOUT, EPOLLRDHUP } from './readiness.ts';
 import { acquire, pollableOf, type Resource, ResourceTable, type StdioStream } from './resource.ts';
 import type { Scheduler } from './scheduler.ts';
@@ -54,7 +58,19 @@ export interface AsyncKernelOptions {
   readonly authorizeNetwork?: (request: NetworkRequest) => AsyncError | undefined;
   /** Addresses of a getaddrinfo result the guest fetched (for the policy's resolved rules). */
   readonly recordResolved?: (host: string, addresses: readonly Uint8Array[]) => void;
+  /** Child processes and their policy seams; without it spawning fails with `ENOSYS`. */
+  readonly process?: ProcessOptions;
+  /** OS signal capture for the guest's cancellation signals; none when absent. */
+  readonly osSignals?: SignalPort;
 }
+
+/** A host without child processes. */
+const NO_PROCESSES: ProcessPort = {
+  spawn: () => Promise.resolve(err({ code: 'ENOSYS' })),
+  kill: () => err({ code: 'ENOSYS' }),
+  openPolicyTransfer: () => err({ code: 'ENOSYS' }),
+  closeFd: () => {},
+};
 
 /** The thread pool's binding to one poll instance (moonrun `ThreadPoolRegistration`). */
 interface PoolRegistration {
@@ -86,13 +102,17 @@ export class AsyncKernel {
   readonly cBuffers: CBuffers;
   readonly pool: ThreadPool;
   readonly network: KernelNetwork;
-  readonly signals = new RunSignals();
+  readonly signals: RunSignals;
+  /** Child processes (moonrun `HostProcess`). */
+  readonly processes: KernelProcesses;
   /** `flock` locks of this Run. */
   readonly locks = new FileLocks();
   readonly #lockKeys = new WeakMap<object, string>();
   #nextLockKey = 0;
   /** `errno` as `os_error/get_errno` reports it. */
   errno = 0;
+  /** The TLS family's handle table (moonrun `tls_connections`), counted by {@link leakSummary}. */
+  tlsConnections: { readonly size: number } = { size: 0 };
   readonly #polls: Handles<Poller>;
   readonly #options: AsyncKernelOptions;
   #currentEventPoll: Handle | undefined;
@@ -105,7 +125,17 @@ export class AsyncKernel {
     this.cBuffers = new CBuffers(this.keys);
     this.#polls = new Handles(this.keys, 'poll');
     const authorize = options.authorizeFilesystem ?? (() => undefined);
+    this.signals = new RunSignals(options.osSignals);
+    const processOptions = options.process;
+    const processEnvironment: ProcessEnvironment = {
+      port: processOptions?.port ?? NO_PROCESSES,
+      children: new Children(),
+      authorizeSpawn: processOptions?.authorizeSpawn,
+      inheritance: processOptions?.inheritance,
+      authority: processOptions?.authority,
+    };
     this.pool = new ThreadPool(this.keys, {
+      processes: processEnvironment,
       scheduler: options.scheduler,
       stdio: options.stdio,
       files: options.files,
@@ -116,6 +146,17 @@ export class AsyncKernel {
       lockKeyOf: (owner) => this.#lockKeyOf(owner),
       authorize,
     });
+    this.processes = new KernelProcesses(
+      new ProcessInputs(this.keys),
+      this.resources,
+      this.pool,
+      this.signals,
+      () => ({
+        registered: this.#registration !== undefined,
+        source: this.#registration?.source,
+      }),
+      processEnvironment,
+    );
     this.network = new KernelNetwork(this.keys, this.resources, this.pool, this.cBuffers, {
       net: options.net,
       ...(options.authorizeNetwork === undefined ? {} : { authorize: options.authorizeNetwork }),
@@ -280,8 +321,7 @@ export class AsyncKernel {
     if (this.#registration === undefined) {
       return err(BADF);
     }
-    this.signals.start(this.#registration.source);
-    return ok(undefined);
+    return this.signals.start(this.#registration.source);
   }
 
   /** Makes a Job over a resource, acquiring it for the Job's lifetime. */
@@ -319,6 +359,7 @@ export class AsyncKernel {
     if (!resource.ok) {
       return resource;
     }
+    this.processes.closed(fd, resource.value);
     for (const [, poller] of this.#polls.entries()) {
       poller.unregister(resource.value);
     }
@@ -345,6 +386,7 @@ export class AsyncKernel {
         return stat.ok ? ok(fdKindOfMode(stat.value.mode)) : err(native(stat.error.code));
       }
       case 'inotify':
+      case 'process':
         // An anonymous inode: `st_mode` has no file type.
         return ok('unknown');
       case 'socket':
@@ -388,6 +430,7 @@ export class AsyncKernel {
         return r.ok ? r : err(native(r.error.code));
       }
       case 'inotify':
+      case 'process':
         return err(INVAL);
       case 'socket':
         return value.socket.read(dst);
@@ -428,6 +471,7 @@ export class AsyncKernel {
         return r.ok ? r : err(native(r.error.code));
       }
       case 'inotify':
+      case 'process':
         return err(INVAL);
       case 'socket':
         return value.socket.write(src);
@@ -576,6 +620,7 @@ export class AsyncKernel {
   /** Run teardown: stop Workers and timers, close polls and guest-owned resources. */
   teardown(): void {
     this.destroyThreadPool();
+    this.processes.children.teardown();
     for (const [handle] of [...this.#polls.entries()]) {
       this.pollDestroy(handle);
     }
@@ -595,9 +640,13 @@ export class AsyncKernel {
     add('addr_infos', this.network.addrInfoCount);
     add('jobs', this.pool.jobCount);
     add('polls', this.#polls.size);
+    for (const [name, count] of this.processes.inputs.leakCounts()) {
+      add(name, count);
+    }
     if (this.#registration !== undefined) {
       leaks.push('completion_notifier=1', 'completion_source=1');
     }
+    add('tls_connections', this.tlsConnections.size);
     add('resources', this.resources.ownedCount - (this.#registration === undefined ? 0 : 1));
     add('workers', this.pool.workerCount);
     return leaks.length === 0 ? undefined : leaks.join(', ');

@@ -154,6 +154,9 @@ async function main(argv: readonly string[]): Promise<number> {
       return outcome.code;
     case 'guest-failure':
       return 1;
+    case 'panicked':
+      // Rust's exit code for a panic in `main`.
+      return 101;
     case 'signaled':
       process.kill(process.pid, outcome.signal);
       return 128 + outcome.signal;

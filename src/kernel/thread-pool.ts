@@ -79,6 +79,12 @@ export class ThreadPool {
     return this.#jobs.insert({ state: 'ready', job: new Job(payload) });
   }
 
+  /** A Job that has not been handed to a Worker yet (moonrun `ready_job_mut`). */
+  readyJob(handle: Handle): Result<Job, AsyncError> {
+    const slot = this.#jobs.get(handle);
+    return slot?.state === 'ready' ? ok(slot.job) : err(BADF);
+  }
+
   /** A Job the guest may inspect: not while a Worker owns it. */
   job(handle: Handle): Result<Job, AsyncError> {
     const slot = this.#jobs.get(handle);
@@ -122,6 +128,15 @@ export class ThreadPool {
         // Native realpath frees the resolved path in the Job finalizer.
         if (payload.result?.state === 'published') {
           this.#env.cBuffers.free(payload.result.handle);
+        }
+        return;
+      case 'domain':
+        payload.work.release();
+        return;
+      case 'spawn':
+        // moonrun `revoke_unclaimed_spawn`: a child never claimed as a handle loses its pid.
+        if (payload.result?.state === 'unpublished') {
+          this.#env.processes.authority?.revokeUnclaimed(payload.result.child.pid);
         }
         return;
       default:
@@ -371,6 +386,21 @@ function releasePayload(payload: JobPayload, cBuffers: CBuffers): void {
       relinquish(payload.resource);
       cBuffers.restore(payload.buffer.handle, payload.buffer.bytes);
       return;
+    case 'spawn':
+      for (const resource of payload.stdio) {
+        if (resource !== undefined) {
+          relinquish(resource);
+        }
+      }
+      return;
+    case 'wait-for-process':
+      if (payload.resource !== undefined) {
+        relinquish(payload.resource);
+      }
+      return;
+    case 'sigwait':
+      payload.sink.detach();
+      return;
     case 'statx':
     case 'file-kind-by-path':
       if (payload.parent !== undefined) {
@@ -379,6 +409,7 @@ function releasePayload(payload: JobPayload, cBuffers: CBuffers): void {
       return;
     case 'failed':
     case 'sleep':
+    case 'domain':
     case 'open':
     case 'file-time-by-path':
     case 'access':

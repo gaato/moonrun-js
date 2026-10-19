@@ -33,6 +33,12 @@ export interface RunContext {
    * message turns the outcome into a host failure (moonrun's memory-sanitizer leak check).
    */
   onCompleted(check: () => string | undefined): void;
+  /**
+   * Registers a host-state summary for `MOONBIT_ASYNC_CHECK_FD_LEAK` (moonrun's
+   * `Drop for Runtime`): `undefined` when nothing leaked, else e.g. `sqlite(databases=1)`.
+   * Summaries follow the async one in registration order.
+   */
+  onLeakCheck(summary: () => string | undefined): void;
 }
 
 /** A family builds the imports of one wasm import module for a run. */

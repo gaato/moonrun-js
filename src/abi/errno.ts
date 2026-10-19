@@ -63,6 +63,8 @@ export const LINUX_ERRNO: Readonly<Record<HostErrorCode, number>> = {
   EISCONN: 106,
   ESHUTDOWN: 108,
   EHOSTDOWN: 112,
+  ENOEXEC: 8,
+  E2BIG: 7,
 };
 
 /** glibc `strerror` texts, which is what Rust's `io::Error` prints for an OS error. */
@@ -128,6 +130,8 @@ const STRERROR: Readonly<Record<HostErrorCode, string>> = {
   EISCONN: 'Transport endpoint is already connected',
   ESHUTDOWN: 'Cannot send after transport endpoint shutdown',
   EHOSTDOWN: 'Host is down',
+  ENOEXEC: 'Exec format error',
+  E2BIG: 'Argument list too long',
 };
 
 function isKnown(code: string): code is HostErrorCode {

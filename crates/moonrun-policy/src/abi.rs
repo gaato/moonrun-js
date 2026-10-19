@@ -530,6 +530,64 @@ pub unsafe extern "C" fn policy_authorize_write(path: *const u8, len: usize) -> 
     with_run(|run| host_code(run.filesystem.authorize_write(path)))
 }
 
+// ----- SQLite (sqlite/policy.rs) -----
+
+/// moonrun `open_database`'s admission: `normalize_open_flags`, then `ensure_valid_database`
+/// with the normalized flags. `vfs` is the guest's u64 split into halves. Returns the
+/// normalized flags, or the SQLite result code negated.
+///
+/// # Safety
+/// The buffer must come from `policy_alloc`; it holds the filename without its NUL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn policy_sqlite_admit(filename: *const u8, len: usize, flags: i32, vfs_low: u32, vfs_high: u32) -> i32 {
+    let Ok(filename) = std::ffi::CString::new(unsafe { input(filename, len) }) else {
+        return -libsqlite3_sys::SQLITE_CANTOPEN;
+    };
+    let vfs = (u64::from(vfs_high) << 32) | u64::from(vfs_low);
+    let flags = crate::sqlite_policy::normalize_open_flags(flags);
+    with_run(|run| match crate::sqlite_policy::ensure_valid_database(&run.filesystem, &filename, flags, vfs) {
+        Ok(()) => flags,
+        Err(code) => -code,
+    })
+}
+
+/// Upstream `untrusted_authorizer` for one authorizer call of the engine. Each string is
+/// absent (`len == usize::MAX`) for a NULL argument.
+///
+/// # Safety
+/// The buffers must come from `policy_alloc`; they hold the strings without their NUL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn policy_sqlite_authorize(
+    action: i32,
+    argument1: *const u8,
+    argument1_len: usize,
+    argument2: *const u8,
+    argument2_len: usize,
+    database: *const u8,
+    database_len: usize,
+    trigger: *const u8,
+    trigger_len: usize,
+) -> i32 {
+    if libsqlite3_sys::recorded_authorizer().is_none() {
+        // Upstream installs the authorizer per connection; the stand-in records it.
+        crate::sqlite_policy::install_authorizer(std::ptr::NonNull::dangling());
+    }
+    let Some(authorizer) = libsqlite3_sys::recorded_authorizer() else {
+        return libsqlite3_sys::SQLITE_DENY;
+    };
+    let text = |ptr: *const u8, len: usize| {
+        (len != ABSENT).then(|| std::ffi::CString::new(unsafe { input(ptr, len) }).unwrap_or_default())
+    };
+    let arguments = [
+        text(argument1, argument1_len),
+        text(argument2, argument2_len),
+        text(database, database_len),
+        text(trigger, trigger_len),
+    ];
+    let pointer = |i: usize| arguments[i].as_ref().map_or(std::ptr::null(), |s| s.as_ptr());
+    unsafe { authorizer(std::ptr::null_mut(), action, pointer(0), pointer(1), pointer(2), pointer(3)) }
+}
+
 // ----- network and process -----
 
 /// 1 when a network policy is enforced (moonrun builds `HostNetwork` checks only then).

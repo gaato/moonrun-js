@@ -123,6 +123,7 @@ function capture(stdin: string): StdioPort & { out: Uint8Array[]; err: Uint8Arra
       offset += n;
       return n;
     },
+    readStdinAsync: () => Promise.reject(new Error('not used')),
   };
 }
 

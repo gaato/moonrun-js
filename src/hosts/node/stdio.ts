@@ -1,4 +1,4 @@
-import { readSync, writeSync } from 'node:fs';
+import { read, readSync, writeSync } from 'node:fs';
 import type { StdioPort } from '../../ports/stdio.ts';
 
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
@@ -43,5 +43,17 @@ export function nodeStdio(): StdioPort {
         }
       }
     },
+    readStdinAsync: (buffer) =>
+      new Promise((resolve, reject) => {
+        read(0, buffer, 0, buffer.length, null, (e, n) => {
+          if (e === null) {
+            resolve(n);
+          } else if (e.code === 'EOF') {
+            resolve(0);
+          } else {
+            reject(e);
+          }
+        });
+      }),
   };
 }

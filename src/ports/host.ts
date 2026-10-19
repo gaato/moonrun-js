@@ -4,8 +4,10 @@ import type { EnvPort } from './env.ts';
 import type { FilePort } from './files.ts';
 import type { FsPort } from './fs.ts';
 import type { DnsPort, NetPort } from './net.ts';
+import type { ProcessPort, SignalPort } from './process.ts';
 import type { RandomPort } from './random.ts';
 import type { StdioPort } from './stdio.ts';
+import type { TrustStorePort } from './tls.ts';
 
 /** Everything a run may touch on the host. Missing capabilities use `unsupported` implementations, never `undefined`. */
 export interface Host {
@@ -18,6 +20,12 @@ export interface Host {
   readonly net: NetPort;
   readonly dns: DnsPort;
   readonly components: ComponentsPort;
+  /** Child processes (`thread_pool/spawn_job/*`). */
+  readonly process: ProcessPort;
+  /** OS signals, captured while the guest selected cancellation signals. */
+  readonly signals: SignalPort;
+  /** System root certificates for TLS trust mode 1. */
+  readonly trustStore: TrustStorePort;
   readonly platform: HostPlatform;
 }
 

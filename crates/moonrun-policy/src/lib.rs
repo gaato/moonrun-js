@@ -1,6 +1,6 @@
 //! moonrun-policy: upstream `policy/**`, `runtime/environment*.rs`,
-//! `runtime/working_directory.rs` and `filesystem/mod.rs` (Host Filesystem), verbatim,
-//! behind the C ABI in `abi.rs`. One instance serves one Run.
+//! `runtime/working_directory.rs`, `filesystem/mod.rs` (Host Filesystem) and
+//! `sqlite/policy.rs`, verbatim, behind the C ABI in `abi.rs`. One instance serves one Run.
 #![allow(dead_code, unused_imports)]
 
 pub(crate) use ::os;
@@ -39,6 +39,11 @@ mod runtime {
     pub(crate) use crate::environment::Env;
     pub(crate) use crate::environment_provisioning::EnvProvisioning;
     pub(crate) use crate::working_directory::WorkingDirectory;
+
+    /// runtime/mod.rs `null_handle`: slotmap's `KeyData::null().as_ffi()`.
+    pub(crate) fn null_handle() -> u64 {
+        0x1_ffff_ffff
+    }
 }
 
 /// Stand-in for async_sys/fs/stub.rs's tmp-path helpers (that file is libc-bound).
@@ -70,5 +75,10 @@ mod policy;
 
 #[path = "../upstream/crates/moonrun/src/filesystem/mod.rs"]
 mod filesystem;
+
+// SQLite admission and the SQL authorizer. At the crate root (not inside `mod sqlite`) so
+// its `pub(super)` items are reachable from `abi.rs`; `libsqlite3_sys` is crates/libsqlite3-sys.
+#[path = "../upstream/crates/moonrun/src/sqlite/policy.rs"]
+mod sqlite_policy;
 
 mod abi;

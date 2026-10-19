@@ -8,4 +8,6 @@ import type { HostError, Result } from './result.ts';
 export interface ComponentsPort {
   /** moonrun-policy.wasm: sandbox policy, run environment, Host Filesystem. */
   policy(): Result<WebAssembly.Module, HostError>;
+  /** tls-engine.wasm (crates/tls-engine, rustls): compiled on the first TLS configuration of a run. */
+  tlsEngine(): Result<WebAssembly.Module, HostError>;
 }

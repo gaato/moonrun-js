@@ -16,6 +16,7 @@ v8 = []
 [dependencies]
 os = { path = "../os" }
 libc = { path = "../libc" }
+libsqlite3-sys = { path = "../libsqlite3-sys" }
 tempfile = { path = "../tempfile" }
 moonutil = { path = "../moonutil", features = ["front_matter", "policy_transport"] }
 anyhow = { workspace = true }

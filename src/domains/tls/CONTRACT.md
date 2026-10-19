@@ -89,6 +89,24 @@ afterwards `bytes_read` = input consumed, `bytes_to_write` = output produced
   error `"tls-server-endpoint channel binding unavailable"` (OSSL 471-488,
   771-787).
 
+## ABI wiring (src/abi/async/tls.ts)
+- One `TlsDomain` per Run; sessions live in a `Handles<TlsSession>` of kind
+  `tls-connection` in the Run's shared namespace, counted as `tls_connections`
+  in the leak summary. The engine module comes from `Host.components.tlsEngine()`
+  (the host compiles it; the core never reads files), system roots from
+  `Host.trustStore`.
+- Argument checks run in moonrun's order before the handle lookup: guest
+  memory (`Fault`), then trust / file types (`Inval`), then the handle
+  (`Badf`). Host and path strings are UTF-16 with lone surrogates → U+FFFD (AT
+  365-393). Data slices are views of guest memory; any pairwise overlap,
+  including an empty slice inside another, is `Fault` (AT 282-363).
+- `set_server_files` asks the run's policy (`authorizeRead`, only when one is
+  enforced) for the key then the certificate, also for an unknown handle (the
+  denial line is printed before `Badf`), and reads the files through the
+  `FilePort`, so relative paths resolve against the run's cwd. A read failure
+  is `{strerror} (os error N)` after the moonrun context (D20).
+- `take_error` / `take_global` return NUL-terminated UTF-8 c_buffers.
+
 ## How moonrun-js realizes it (engine side)
 - rustls' unbuffered API reassembles handshake messages in place and keeps
   that state across calls, so every byte of input a call needs is moved into

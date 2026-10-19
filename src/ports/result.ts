@@ -76,7 +76,9 @@ export type HostErrorCode =
   | 'ENOBUFS'
   | 'EISCONN'
   | 'ESHUTDOWN'
-  | 'EHOSTDOWN';
+  | 'EHOSTDOWN'
+  | 'ENOEXEC'
+  | 'E2BIG';
 
 export interface HostError {
   readonly code: HostErrorCode;

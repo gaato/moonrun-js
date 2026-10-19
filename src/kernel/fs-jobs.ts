@@ -73,6 +73,7 @@ function descriptor(resource: Resource): Result<HostFd | undefined, AsyncError> 
     case 'completion-source':
     case 'inotify':
     case 'socket':
+    case 'process':
       return ok(undefined);
   }
 }
@@ -93,7 +94,7 @@ async function fstatOf(
     return lift(await env.files.async.fstat(fd.value));
   }
   const mode =
-    resource.kind === 'inotify'
+    resource.kind === 'inotify' || resource.kind === 'process'
       ? 0n
       : resource.kind === 'socket'
         ? S_IFSOCK | 0o777n
@@ -383,6 +384,8 @@ export function lockOwner(resource: Resource): object {
       return resource.inotify;
     case 'socket':
       return resource.socket;
+    case 'process':
+      return resource.child;
     case 'stdio':
     case 'invalid':
       return resource;

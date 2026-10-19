@@ -4,11 +4,12 @@
 //
 //   node scripts/difftest.ts <cases.json | '{"wasm":{...}}'> [--filter text] [--list]
 //                            [--allow-pending] [--pending a,b] [-v] [--json out.json]
+//                            [--runtime node|deno|bun]
 //
 // A case file is `[case...]` or `{ "wasms": { name: spec }, "seeds": { name: [{from,to}] },
 // "cases": [case...] }`.
 //
-//   case = { id, area?, source?, note?, divergences?: ["D4"],
+//   case = { id, area?, requires?: [area], source?, note?, divergences?: ["D4"],
 //            wasm: <name in "wasms"> | spec,
 //            argv?: ["<wasm>"],        // everything after the runner, default just the module
 //            stdin?, env?, unsetEnv?,
@@ -16,6 +17,10 @@
 //            signal?: { onStdout: text, signal: "SIGINT" }, timeoutMs? }
 //   spec = { wat, vars? } | { text } | { path }
 //        | { moon: { project, target?, command?, env?, artifact } }
+//        | { prebuild: "<owner>/<module>@<version>/<path>.wasm" }  // download.mooncakes.io, sha256-checked
+//
+// Cases in area "network-live" reach the internet and only run with MOONRUN_JS_LIVE=1.
+// `requires` names further areas a case depends on: a mismatch is pending while any is pending.
 //
 // Strings in argv/env/files may use <cwd>, <wasm> and <moonrun> (the reference binary). `\xNN` in argv, env values and
 // seed targets is a raw byte (non-UTF-8 names). `seed.from` is relative to the repo root.
@@ -27,6 +32,7 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   cpSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -34,6 +40,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -51,7 +58,6 @@ const cache = path.join(repoRoot, '.cache', 'conformance');
 const DEFAULT_PENDING = [
   'async-kernel',
   'sockets',
-  'tls',
   'process',
   'signals',
   'sqlite',
@@ -70,11 +76,13 @@ type WasmSpec =
   | { readonly wat: string; readonly vars?: Readonly<Record<string, string>> }
   | { readonly text: string }
   | { readonly path: string }
-  | { readonly moon: MoonSpec };
+  | { readonly moon: MoonSpec }
+  | { readonly prebuild: string };
 
 export interface Case {
   readonly id: string;
   readonly area?: string;
+  readonly requires?: readonly string[];
   readonly source?: string;
   readonly note?: string;
   readonly divergences?: readonly string[];
@@ -137,6 +145,33 @@ function buildMoon(spec: MoonSpec): string {
   return path.join(root, spec.artifact);
 }
 
+const PREBUILD = 'https://download.mooncakes.io/prebuild/';
+
+/** A published prebuilt wasm (what `moonx` runs), downloaded once and checked against its `.sha256`. */
+function downloadPrebuild(name: string): string {
+  const out = path.join(cache, 'prebuild', name);
+  if (existsSync(out)) {
+    return out;
+  }
+  mkdirSync(path.dirname(out), { recursive: true });
+  const fetchText = (url: string): Buffer => {
+    const r = spawnSync('curl', ['-fsSL', '--max-time', '120', url], { maxBuffer: 1 << 28 });
+    if (r.status !== 0) {
+      throw new Error(`curl ${url} failed: ${r.stderr.toString()}`);
+    }
+    return r.stdout;
+  };
+  const body = fetchText(PREBUILD + name);
+  const expected = fetchText(`${PREBUILD}${name}.sha256`).toString().trim().split(/\s+/)[0];
+  const actual = createHash('sha256').update(body).digest('hex');
+  if (expected !== actual) {
+    throw new Error(`${name}: sha256 ${actual} does not match the published ${expected}`);
+  }
+  writeFileSync(`${out}.part`, body);
+  renameSync(`${out}.part`, out);
+  return out;
+}
+
 function hash(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 12);
 }
@@ -152,6 +187,8 @@ function buildWasm(spec: WasmSpec): string {
     out = path.resolve(repoRoot, spec.path);
   } else if ('moon' in spec) {
     out = buildMoon(spec.moon);
+  } else if ('prebuild' in spec) {
+    out = downloadPrebuild(spec.prebuild);
   } else if ('text' in spec) {
     out = path.join(cache, 'wasm', `text-${hash(spec.text)}.wasm`);
     mkdirSync(path.dirname(out), { recursive: true });
@@ -376,7 +413,7 @@ function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<s
       cls = 'known';
     } else if (c.divergences?.includes('D5') === true && c.area === 'cli-identity') {
       cls = 'known';
-    } else if (c.area !== undefined && pending.has(c.area)) {
+    } else if ([c.area, ...(c.requires ?? [])].some((a) => a !== undefined && pending.has(a))) {
       cls = 'pending';
     } else {
       cls = 'mismatch';
@@ -424,28 +461,40 @@ function loadCases(arg: string): Case[] {
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
-  const input = argv.find((a) => !a.startsWith('-') && argv[argv.indexOf(a) - 1] !== '--filter');
+  const valued = new Set(['--filter', '--pending', '--json', '--runtime']);
+  const input = argv.find((a, i) => !a.startsWith('-') && !valued.has(argv[i - 1] ?? ''));
   const option = (name: string): string | undefined => {
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : undefined;
   };
   if (input === undefined || argv.includes('--help')) {
     console.error(
-      "usage: node scripts/difftest.ts <cases.json|'{json}'> [--filter text] [--list] [--allow-pending] [--pending a,b] [-v] [--json out]",
+      "usage: node scripts/difftest.ts <cases.json|'{json}'> [--filter text] [--list] [--allow-pending] [--pending a,b] [-v] [--json out] [--runtime node|deno|bun]",
     );
     return 2;
   }
   const filter = option('--filter');
   const pending = new Set((option('--pending') ?? DEFAULT_PENDING.join(',')).split(','));
   const verbose = argv.includes('-v');
-  const cases = loadCases(input).filter((c) => filter === undefined || c.id.includes(filter));
+  const selected = loadCases(input).filter((c) => filter === undefined || c.id.includes(filter));
+  const live = process.env['MOONRUN_JS_LIVE'] === '1';
+  const cases = selected.filter((c) => live || c.area !== 'network-live');
+  if (cases.length < selected.length) {
+    console.log(
+      `skipping ${selected.length - cases.length} network-live cases (set MOONRUN_JS_LIVE=1)`,
+    );
+  }
   if (argv.includes('--list')) {
     for (const c of cases) {
       console.log(`${c.id}\t${c.area ?? ''}\t${c.source ?? ''}`);
     }
     return 0;
   }
-  const candidate = path.join(repoRoot, 'bin/moonrun-js');
+  const runtime = option('--runtime') ?? 'node';
+  const candidate = path.join(
+    repoRoot,
+    runtime === 'node' ? 'bin/moonrun-js' : `bin/moonrun-js-${runtime}`,
+  );
   // One scratch directory per case; both runners get it freshly recreated.
   const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), 'moonrun-difftest-')));
   const verdicts: Verdict[] = [];

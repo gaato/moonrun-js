@@ -3,6 +3,7 @@ import type { ImportFamily, RunContext } from '../abi/context.ts';
 import { FAMILIES } from '../abi/families.ts';
 import { GuestMemory } from '../abi/memory.ts';
 import { osCapabilities } from '../abi/os-capabilities.ts';
+import { ChildAuthority } from '../domains/policy/child-authority.ts';
 import { PolicyComponent } from '../domains/policy/component.ts';
 import { Stdio, Utf16Writer } from '../domains/stdio.ts';
 import { type Termination, TerminationCell } from '../kernel/termination.ts';
@@ -37,6 +38,11 @@ export type RunOutcome =
   | { readonly kind: 'completed' }
   | { readonly kind: 'exited'; readonly code: number }
   | { readonly kind: 'signaled'; readonly signal: number }
+  /**
+   * moonrun panicked at the end of the Run (the `MOONBIT_ASYNC_CHECK_FD_LEAK` check); the
+   * panic message was already written to stderr. The CLI exits with 101.
+   */
+  | { readonly kind: 'panicked'; readonly message: string }
   /** The guest trapped or threw; the diagnostic was already written to stderr. */
   | { readonly kind: 'guest-failure'; readonly diagnostic: string }
   | { readonly kind: 'host-failure'; readonly failure: HostFailure };
@@ -100,8 +106,21 @@ function policySeams(policy: PolicyComponent | undefined): PolicySeams {
           recordResolved: (host, addresses) => policy.recordResolved(host, addresses),
         }
       : {}),
+    process: {
+      inheritance: () => policy.inheritance(),
+      // moonrun creates `ChildAuthority` exactly under a process policy.
+      ...(policy.checksProcesses
+        ? {
+            authorizeSpawn: (program, argv) => policy.checkSpawn(program, argv),
+            authority: new ChildAuthority(),
+          }
+        : {}),
+    },
   };
 }
+
+/** The variable moonrun's `Drop for Runtime` reads (historical name, whole Runtime). */
+const LEAK_CHECK_VARIABLE = 'MOONBIT_ASYNC_CHECK_FD_LEAK';
 
 export async function run(
   loaded: LoadedModule,
@@ -117,6 +136,7 @@ export async function run(
   const termination = new TerminationCell();
   const cleanups: (() => void)[] = [];
   const completionChecks: (() => string | undefined)[] = [];
+  const leakChecks: (() => string | undefined)[] = [];
   const asyncKernel = createAsyncKernel(host, policySeams(loadedPolicy));
   cleanups.push(() => asyncKernel.teardown());
   const ctx: RunContext = {
@@ -139,6 +159,36 @@ export async function run(
     onTeardown: (cleanup) => {
       cleanups.push(cleanup);
     },
+    onLeakCheck: (summary) => {
+      leakChecks.push(summary);
+    },
+  };
+
+  /** moonrun panics in `Drop for Runtime` when host state outlived the Run. */
+  const leakCheck = (): RunOutcome | undefined => {
+    if (ambientHost.env.get(LEAK_CHECK_VARIABLE) === undefined) {
+      return undefined;
+    }
+    const leaks: string[] = [];
+    const leaked = asyncKernel.leakSummary();
+    if (leaked !== undefined) {
+      leaks.push(`async(${leaked})`);
+    }
+    for (const summary of leakChecks) {
+      const found = summary();
+      if (found !== undefined) {
+        leaks.push(found);
+      }
+    }
+    if (leaks.length === 0) {
+      return undefined;
+    }
+    const message = `moonrun Runtime leaked host state: ${leaks.join(', ')}`;
+    stdio.flushStdout();
+    stdio.writeStderrText(
+      `\nthread 'main' (${host.platform.pid}) panicked at crates/moonrun/src/runtime/mod.rs:256:13:\n${message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace\n`,
+    );
+    return { kind: 'panicked', message };
   };
   const noStackTrace = options.noStackTrace ?? false;
 
@@ -255,7 +305,7 @@ export async function run(
     return finish(await call(start, []), undefined);
   };
 
-  try {
+  const conclude = async (): Promise<RunOutcome> => {
     const outcome = await execute();
     if (outcome.kind !== 'completed') {
       return outcome;
@@ -267,6 +317,12 @@ export async function run(
       }
     }
     return outcome;
+  };
+
+  try {
+    const outcome = await conclude();
+    // The check sees the host state before teardown, whatever the outcome.
+    return leakCheck() ?? outcome;
   } finally {
     stdio.flushStdout();
     for (const cleanup of cleanups) {

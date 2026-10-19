@@ -7,7 +7,7 @@
 # scripts/build-tls.ts prepares in .cache/.
 [workspace]
 resolver = "3"
-members = ["os", "libc", "tempfile", "moonutil", "moonrun-policy", "moonrun-diag", "moonrun-cli", "stat-layout"]
+members = ["os", "libc", "libsqlite3-sys", "tempfile", "moonutil", "moonrun-policy", "moonrun-diag", "moonrun-cli", "stat-layout"]
 exclude = ["tls-engine"]
 
 [workspace.package]

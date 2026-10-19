@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Diagnostics } from '../../diagnostics/diag.ts';
 import { DIAGNOSTICS_URL } from '../../diagnostics/diag-url.ts';
 import { POLICY_URL } from '../../domains/policy/policy-url.ts';
+import { TLS_ENGINE_URL } from '../../domains/tls/engine-url.ts';
 import type { ComponentsPort } from '../../ports/components.ts';
 import { err, type HostError, hostError, ok, type Result } from '../../ports/result.ts';
 
@@ -26,7 +27,10 @@ export function nodeComponentModule(url: URL): Result<WebAssembly.Module, HostEr
 }
 
 export function nodeComponents(): ComponentsPort {
-  return { policy: () => nodeComponentModule(POLICY_URL) };
+  return {
+    policy: () => nodeComponentModule(POLICY_URL),
+    tlsEngine: () => nodeComponentModule(TLS_ENGINE_URL),
+  };
 }
 
 /** The diagnostics component; its compile failure is a broken installation. */

@@ -46,12 +46,18 @@ export function readGuestPath(memory: GuestMemory, ptr: number, len: number): st
 /** moonrun `Job::filesystem`: every payload but the failed, sleep and network Jobs. */
 export function isFilesystem(
   payload: JobPayload,
-): payload is Exclude<JobPayload, { kind: 'failed' | 'sleep' | 'bind' | 'getaddrinfo' }> {
+): payload is Exclude<
+  JobPayload,
+  { kind: 'failed' | 'sleep' | 'bind' | 'getaddrinfo' | 'spawn' | 'wait-for-process' | 'sigwait' }
+> {
   return (
     payload.kind !== 'failed' &&
     payload.kind !== 'sleep' &&
     payload.kind !== 'bind' &&
-    payload.kind !== 'getaddrinfo'
+    payload.kind !== 'getaddrinfo' &&
+    payload.kind !== 'spawn' &&
+    payload.kind !== 'wait-for-process' &&
+    payload.kind !== 'sigwait'
   );
 }
 

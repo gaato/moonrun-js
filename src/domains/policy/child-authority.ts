@@ -1,5 +1,8 @@
 import { type AsyncError, PERMISSION_DENIED } from '../../kernel/errors.ts';
+import type { ChildAuthorityPort } from '../../kernel/process.ts';
 import { err, ok, type Result } from '../../ports/result.ts';
+
+export { isMoonxExecutable } from '../../kernel/process.ts';
 
 // Child-process provenance under a policy. Upstream keeps it in process/mod.rs, which is
 // OS-bound and not reused (docs/reuse.md), so this stays a TypeScript port. The spawn
@@ -7,21 +10,12 @@ import { err, ok, type Result } from '../../ports/result.ts';
 
 const denied = (): Result<never, AsyncError> => err(PERMISSION_DENIED);
 
-/** `moonutil::constants::is_moonx_executable` on Unix: the final component is `moonx` or `moonx.exe`. */
-export function isMoonxExecutable(program: string): boolean {
-  const name = program
-    .split('/')
-    .filter((p) => p !== '')
-    .at(-1);
-  return name === 'moonx' || name === 'moonx.exe';
-}
-
 /**
  * Child-process provenance (moonrun's `ChildAuthorityState`). It exists only under a policy:
  * once a policy is active the guest may only wait on, signal or open handles for children it
  * spawned itself. Every failure is a silent EACCES.
  */
-export class ChildAuthority {
+export class ChildAuthority implements ChildAuthorityPort {
   readonly #ownedPids = new Set<number>();
   readonly #handlePids = new Map<bigint, number>();
 

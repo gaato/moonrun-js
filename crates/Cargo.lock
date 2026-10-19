@@ -160,6 +160,10 @@ name = "libc"
 version = "0.2.999"
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.38.999"
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -191,6 +195,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "libc",
+ "libsqlite3-sys",
  "moonutil",
  "os",
  "serde",

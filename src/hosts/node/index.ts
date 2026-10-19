@@ -7,7 +7,10 @@ export { nodeDiagnostics } from './components.ts';
 import { nodeFiles } from './files.ts';
 import { nodeFs } from './fs.ts';
 import { nodeDns, nodeNet } from './net.ts';
+import { nodeProcess } from './process.ts';
+import { nodeSignals } from './signals.ts';
 import { nodeStdio } from './stdio.ts';
+import { nodeTrustStore } from './trust-store.ts';
 
 export interface NodeHostOptions {
   /** Absolute path of the wasm file, for `current_exe`. */
@@ -44,6 +47,9 @@ export function nodeHost(options: NodeHostOptions = {}): Host {
     fs: nodeFs(cwd),
     files: nodeFiles(cwd),
     components: nodeComponents(),
+    process: nodeProcess(),
+    signals: nodeSignals(),
+    trustStore: nodeTrustStore(),
     net: nodeNet(),
     dns: nodeDns(),
     platform: { currentExe: options.currentExe, pid: process.pid },

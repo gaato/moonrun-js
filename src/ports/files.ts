@@ -60,6 +60,8 @@ export interface FilePort {
   /** One `write(2)`/`pwrite(2)`; may write fewer bytes than given. */
   write(fd: HostFd, bytes: Uint8Array, position?: bigint): Result<number, HostError>;
   fsync(fd: HostFd): Result<void, HostError>;
+  /** `ftruncate(2)`. */
+  truncate(fd: HostFd, size: bigint): Result<void, HostError>;
   fstat(fd: HostFd): Result<FileStat, HostError>;
   stat(path: string): Result<FileStat, HostError>;
   lstat(path: string): Result<FileStat, HostError>;
@@ -71,6 +73,8 @@ export interface FilePort {
   mkdir(path: string, mode?: number): Result<void, HostError>;
   rmdir(path: string): Result<void, HostError>;
   unlink(path: string): Result<void, HostError>;
+  /** `access(2)` for one mode. */
+  access(path: string, mode: AccessMode): Result<void, HostError>;
   /** `realpath(3)`. */
   realpath(path: string): Result<string, HostError>;
   /** Non-blocking variants for the async Filesystem Jobs. */

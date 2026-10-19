@@ -98,6 +98,12 @@ export function memoryStdio(stdin: Uint8Array = new Uint8Array()): StdioPort & {
       offset += n;
       return n;
     },
+    readStdinAsync: (buffer) => {
+      const n = Math.min(buffer.length, stdin.length - offset);
+      buffer.set(stdin.subarray(offset, offset + n));
+      offset += n;
+      return Promise.resolve(n);
+    },
   };
 }
 

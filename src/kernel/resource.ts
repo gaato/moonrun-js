@@ -6,6 +6,7 @@ import type { HostFile } from './file.ts';
 import { canonical, type Handle, type HostKeys } from './handles.ts';
 import type { Inotify } from './inotify.ts';
 import type { PipeEnd } from './pipe.ts';
+import type { Child } from './process.ts';
 import type { Pollable } from './readiness.ts';
 import type { Socket } from './socket.ts';
 
@@ -30,7 +31,9 @@ export type Resource =
   /** `fs/inotify/create`. */
   | { readonly kind: 'inotify'; readonly inotify: Inotify }
   /** A TCP or UDP socket (`make_tcp_socket`, `make_udp_socket`, `accept`). */
-  | { readonly kind: 'socket'; readonly socket: Socket };
+  | { readonly kind: 'socket'; readonly socket: Socket }
+  /** A pidfd of a child (`spawn_job_get_result_handle`, `open_pid_handle`). */
+  | { readonly kind: 'process'; readonly child: Child };
 
 /** The poll target of a resource, or `undefined` when epoll would refuse it (`EPERM`). */
 export function pollableOf(resource: Resource): Pollable | undefined {
@@ -43,6 +46,8 @@ export function pollableOf(resource: Resource): Pollable | undefined {
       return resource.inotify;
     case 'socket':
       return resource.socket;
+    case 'process':
+      return resource.child;
     case 'invalid':
     case 'stdio':
     // Opened files take the thread pool (regular files and directories cannot be
@@ -72,6 +77,7 @@ function releaseResource(resource: Resource): void {
     case 'invalid':
     case 'stdio':
     case 'completion-source':
+    case 'process':
       return;
   }
 }

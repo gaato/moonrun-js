@@ -103,6 +103,7 @@ export function nodeFiles(cwd: string = process.cwd()): FilePort {
         fs.writeSync(fd, bytes, 0, bytes.length, position === undefined ? null : Number(position)),
       ),
     fsync: (fd) => attempt(() => fs.fsyncSync(fd)),
+    truncate: (fd, size) => attempt(() => fs.ftruncateSync(fd, Number(size))),
     fstat: (fd) => attempt(() => toStat(fs.fstatSync(fd, { bigint: true }))),
     stat: (p) => attempt(() => toStat(fs.statSync(at(p), { bigint: true }))),
     lstat: (p) => attempt(() => toStat(fs.lstatSync(at(p), { bigint: true }))),
@@ -116,6 +117,7 @@ export function nodeFiles(cwd: string = process.cwd()): FilePort {
       }),
     rmdir: (p) => attempt(() => fs.rmdirSync(at(p))),
     unlink: (p) => attempt(() => fs.unlinkSync(at(p))),
+    access: (p, mode) => attempt(() => fs.accessSync(at(p), ACCESS[mode])),
     realpath: (p) => attempt(() => fs.realpathSync.native(at(p))),
     async: nodeAsyncFiles(at),
   };
