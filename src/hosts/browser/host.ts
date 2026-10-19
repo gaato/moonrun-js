@@ -27,7 +27,7 @@ export interface BrowserHostOptions {
   readonly roots?: readonly Uint8Array[];
 }
 export interface BrowserSignalOptions {
-  readonly target: 'children';
+  readonly target: 'group';
 }
 export interface BrowserHost extends Host {
   readonly diagnostics: Diagnostics;
@@ -35,7 +35,7 @@ export interface BrowserHost extends Host {
     wasm: Uint8Array | WebAssembly.Module,
     options?: { readonly name?: string; readonly args?: readonly string[] },
   ): Promise<RunOutcome>;
-  /** Deliver to the top Run by default, or use the process kill path for its live descendants. */
+  /** Deliver to the top Run by default, or to the top Run and all its live descendants. */
   signal(signal: number): void;
   signal(signal: number, options: BrowserSignalOptions): boolean;
 }
@@ -200,14 +200,18 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     function signal(s: number): void;
     function signal(s: number, options: BrowserSignalOptions): boolean;
     function signal(s: number, options?: BrowserSignalOptions): boolean | undefined {
-      if (options?.target !== 'children') {
+      if (options?.target !== 'group') {
         control.send(s);
         return;
       }
       let delivered = false;
-      for (const [key, active] of tree.controls) {
-        if (key !== rootPid && !active.abort.signal.aborted && port.kill(key, s).ok)
+      // Snapshot membership before delivery: the top Run's default action may end the tree.
+      for (const [key, active] of [...tree.controls]) {
+        if (active.abort.signal.aborted) continue;
+        if (key === rootPid) {
+          active.send(s);
           delivered = true;
+        } else if (port.kill(key, s).ok) delivered = true;
       }
       return delivered;
     }

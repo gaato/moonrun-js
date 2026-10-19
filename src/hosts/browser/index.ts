@@ -166,7 +166,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
         .catch(failure);
     };
     signal = (s, options) => {
-      if (options?.target !== 'children') {
+      if (options?.target !== 'group') {
         if (!done) worker.postMessage({ type: 'signal', signal: s });
         return;
       }
@@ -175,7 +175,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
       return new Promise<boolean>((resolve, reject) => {
         signals.set(key, resolve);
         try {
-          worker.postMessage({ type: 'signal', signal: s, target: 'children', id: key });
+          worker.postMessage({ type: 'signal', signal: s, target: 'group', id: key });
         } catch (e) {
           signals.delete(key);
           reject(e);

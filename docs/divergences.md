@@ -52,7 +52,7 @@
 
 
 | D45 | Browser の任意の resolver が返した wasm を同一 Worker 内の child Run として実行する拡張。ネイティブ executable / PATH 検索は行わず、undefined は ENOENT（cli/sh が message と 127 を決める）。VFS / open-file offset は共有、cwd/env/kernel は子ごと。正常=0、exit は下位8bit、trap/host failure=1、panic=101、signal は kernel の既存の負数表現。top Run の終了で残る子は停止。extra fd / policy transfer / detached process は非対応 | 本家 moonrun の OS process ではなく embedder 提供プログラムを実行する opt-in 拡張。async stdio は既存 kernel pipe と process bridge で背圧を維持。legacy/WASI 出力も pipe の背圧で JSPI suspension しうる（start section からの suspend は不可）。詳細 docs/browser.md |
-| D46 | Browser streaming stdin は async read job で入力到着まで待ち、64 KiB を基準に背圧を返す。同期 legacy/WASI read は待てず、現時点で空なら EOF。signal は仮想 capture に配送し、default/kill は import・suspend 境界で Run を終了する。pid は Worker 内の合成通し番号。OS tty / foreground process group / CPU-bound wasm の個別 preemption は無し | postMessage と同一 Worker の単一 JS event loop の制約。cli/sh 0.2.1 への SIGINT は前景の子の取消と shell Run の signal 2 終了を起こす。foreground だけの Ctrl-C を一般的に選べる SignalPort は存在しない |
+| D46 | Browser streaming stdin は async read job で入力到着まで待ち、64 KiB を基準に背圧を返す。同期 legacy/WASI read は待てず、現時点で空なら EOF。signal は仮想 capture に配送し、default/kill は import・suspend 境界で Run を終了する。pid は Worker 内の合成通し番号。OS tty / 任意の process group 選択 / CPU-bound wasm の個別 preemption は無し | postMessage と同一 Worker の単一 JS event loop の制約。`signal(n, {target: 'group'})` は top Run と全子孫を一つの前景 group として通常の signal 経路に配送する。shell が生き残るには guest 自身の SIGINT 捕捉が必要。cli/sh 0.2.1 は捕捉せず signal 2 で終了する |
 
 P6 の測定上の注意:
 

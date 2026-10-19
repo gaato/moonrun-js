@@ -31,7 +31,7 @@ export type WorkerMessage =
   | {
       readonly type: 'signal';
       readonly signal: number;
-      readonly target?: 'children';
+      readonly target?: 'group';
       readonly id?: number;
     }
   | {

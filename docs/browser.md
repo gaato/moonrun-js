@@ -161,30 +161,36 @@ capture/cancellation machinery. A shell's process cancellation stops its foregro
 child through the existing process jobs; in cli/sh 0.2.1 this ends the shell Run with
 signal 2 too. The default call still returns `void`.
 
-For a browser terminal that should keep its shell alive, target the commands instead:
+For tty-style foreground process-group delivery, include the top Run and its commands:
 
 ```ts
-const delivered = await running.signal(2, { target: 'children' });
-// false means no live child accepted the signal; the top Run is never signaled here.
+const delivered = await running.signal(2, { target: 'group' });
+// true means at least one live process received the signal, including the top Run.
 ```
 
-This returns a `Promise<boolean>` acknowledged by the Worker. It uses the existing
-`process.kill` path for **all live wasm descendants** started through `resolveCommand`,
-including nested shells and their commands, and excludes the top Run. `true` means at
-least one child accepted the signal, not that it has finished. With no live children,
-or after the Run ends, it resolves to `false`. Commands still being resolved and future
-children are not included. This is a broadcast to the run's children, including any
-background commands, rather than POSIX foreground process-group/tty job selection.
+This returns a `Promise<boolean>` acknowledged by the Worker. The run is treated as one
+foreground process group: **the top-level guest and all live wasm descendants** started
+through `resolveCommand`, including nested shells and their commands. Each receives the
+signal through its normal path: the top Run's signal dispatch, or `process.kill` for a
+child. A guest that captured the signal runs its handler; otherwise the default action
+applies. `true` means delivery to at least one live process, not that it has finished.
+The top Run alone is sufficient, even without a resolver or children. After the Run
+ends the result is `false`. Commands still being resolved and future children are not
+included. There is no pgid/tty or job-selection API; the embedder chooses the foreground
+run, and every live process in that run belongs to its group.
 
-The lower-level `host.signal(2, {target: 'children'})` returns the same boolean
-synchronously. A known child pid can also be signaled with `host.process.kill(pid, signal)`.
-Both paths accept 1/2/9/15 (0 probes existence); unsupported/invalid signals are not
-delivered by the children broadcast. Captured signals use the child's cancellation
-handlers. Virtual signals interrupt pending streaming stdin reads with EINTR so these
-handlers can finish, while leaving the shared input open for the shell's next command.
+Shells must catch SIGINT themselves to survive group delivery, as POSIX interactive
+shells do. **cli/sh 0.2.1 currently does not**: group SIGINT while it runs cat ends both,
+matching real moonrun in a pty, rather than producing another shell prompt. A parent
+guest that captures SIGINT can continue and wait for its interrupted child normally.
+
+The lower-level `host.signal(2, {target: 'group'})` returns the same boolean synchronously.
+A known child pid can also be signaled with `host.process.kill(pid, signal)` (1/2/9/15;
+0 probes existence). Virtual signals interrupt pending streaming stdin reads with EINTR
+so cancellation can finish, while leaving the shared input open for a surviving parent.
 A child terminated by SIGINT produces `{kind: 'signaled', signal: 2}`, which the existing
-kernel exposes as `-2`; cli/sh 0.2.1 turns that into `$? = 130`. The Worker handle's
-boolean acknowledgment does not replace the guest's normal wait/status machinery.
+kernel exposes as `-2`; cli/sh's conversion is `$? = 130` when the shell itself survives.
+The acknowledgment does not replace the guest's normal wait/status machinery.
 
 Signals are cooperative at imports/suspension points; code that never yields or calls
 imports blocks the shared Worker and cannot be preempted by a message. Terminating the
@@ -248,5 +254,6 @@ verify fixed SHA-256 digests on every use. Tests compare pipelines, missing-comm
 messages/status, nested sh and interactive output with the Node CLI using native host
 commands. Additional tests cover large pipeline backpressure, cwd/env/file redirection,
 merged output, precompiled children, traps/compile failures, kill/wait and SIGINT.
-Children-only SIGINT tests cover a streaming cat, a cat pipeline, a nested shell, and the
-no-children case, checking status 130, the next interactive prompt and the next command.
+Group SIGINT tests cover cli/sh with a streaming cat, a cat pipeline and a nested shell,
+checking that the top Run ends too, plus delivery with no children. A small WAT parent
+captures SIGINT through the guest ABI, survives, and verifies its child's wait status -2.

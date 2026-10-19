@@ -22,7 +22,7 @@ let deliver: ((signal: number, options?: BrowserSignalOptions) => boolean) | und
 const signals: Extract<WorkerMessage, { type: 'signal' }>[] = [];
 function signal(request: Extract<WorkerMessage, { type: 'signal' }>): void {
   const delivered =
-    deliver?.(request.signal, request.target === 'children' ? { target: 'children' } : undefined) ??
+    deliver?.(request.signal, request.target === 'group' ? { target: 'group' } : undefined) ??
     false;
   if (request.id !== undefined)
     scope.postMessage({ type: 'signal-ack', id: request.id, delivered });

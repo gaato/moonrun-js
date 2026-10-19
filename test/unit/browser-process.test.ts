@@ -55,6 +55,12 @@ beforeAll(async () => {
   };
   modules.set('false', exit(1));
   modules.set('true', exit(0));
+  const parent = spawnSync('wasm-tools', [
+    'parse',
+    new URL('test/fixtures/browser-signal-group.wat', root).pathname,
+  ]);
+  if (parent.status !== 0) throw new Error(parent.stderr.toString());
+  modules.set('signal-parent', new Uint8Array(parent.stdout));
 }, 30000);
 afterAll(async () => {
   await rm(scratch, { recursive: true, force: true });
@@ -367,7 +373,7 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
     expect(stderr).toBe('');
   });
   for (const command of ['cat', 'cat | cat', "sh -c 'cat'"]) {
-    it(`interrupts all descendants of ${command} while keeping interactive sh alive`, async () => {
+    it(`delivers group SIGINT to interactive sh and its ${command} descendants`, async () => {
       const close = bridge();
       let stdout = '';
       let stderr = '';
@@ -390,46 +396,67 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
         await handle.write(new TextEncoder().encode(`${command}\n`));
         await handle.write(new TextEncoder().encode('waiting\n'));
         await until(() => stdout.includes('waiting\n'));
-        expect(await handle.signal(2, { target: 'children' })).toBe(true);
-        await until(() => prompts() === 2);
-        expect(await handle.signal(2, { target: 'children' })).toBe(false);
-        await handle.write(new TextEncoder().encode('echo $?; echo survived\n'));
-        await until(() => stdout.includes('130\nsurvived\n'));
-        await handle.write(new TextEncoder().encode('exit 7\n'));
-        handle.end();
-        expect(await handle).toEqual({ kind: 'exited', code: 7 });
+        expect(await handle.signal(2, { target: 'group' })).toBe(true);
+        expect(await handle).toEqual({ kind: 'signaled', signal: 2 });
+        expect(prompts()).toBe(1);
+        expect(await handle.signal(2, { target: 'group' })).toBe(false);
       } finally {
         await close();
       }
     }, 15000);
   }
-  it('reports no children before preparation, at an idle prompt and after the Worker ends', async () => {
+  it('lets a guest that captures SIGINT survive group delivery and wait for child status -2', async () => {
     const close = bridge();
-    let prompted = false;
-    const output = (b: Uint8Array) => {
-      if (new TextDecoder().decode(b).includes('$ ')) prompted = true;
-    };
+    let stdout = '';
+    let stderr = '';
     const handle = runInWorker({
-      wasm: bytes('sh'),
-      name: 'sh',
-      args: ['-i'],
+      wasm: bytes('signal-parent'),
+      name: 'signal-parent',
       stdin: 'stream',
       resolveCommand: async (name) => modules.get(name),
-      stdout: output,
-      stderr: output,
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+      stderr: (b) => {
+        stderr += new TextDecoder().decode(b);
+      },
     });
     try {
-      expect(await handle.signal(2, { target: 'children' })).toBe(false);
-      await until(() => prompted);
-      expect(await handle.signal(2, { target: 'children' })).toBe(false);
-      await handle.write(new TextEncoder().encode('exit 0\n'));
-      handle.end();
+      await handle.write(new TextEncoder().encode('waiting\n'));
+      await until(() => stdout.includes('waiting\n'));
+      expect(await handle.signal(2, { target: 'group' })).toBe(true);
       expect(await handle).toEqual({ kind: 'completed' });
-      expect(await handle.signal(2, { target: 'children' })).toBe(false);
+      expect(stdout).toBe('waiting\ncaught SIGINT; child=-2; parent alive\n');
+      expect(stderr).toBe('');
     } finally {
       await close();
     }
   });
+  for (const when of ['preparation', 'idle prompt']) {
+    it(`delivers group signals with no children at ${when}, and reports false after exit`, async () => {
+      const close = bridge();
+      let prompted = false;
+      const output = (b: Uint8Array) => {
+        if (new TextDecoder().decode(b).includes('$ ')) prompted = true;
+      };
+      const handle = runInWorker({
+        wasm: bytes('sh'),
+        name: 'sh',
+        args: ['-i'],
+        stdin: 'stream',
+        stdout: output,
+        stderr: output,
+      });
+      try {
+        if (when === 'idle prompt') await until(() => prompted);
+        expect(await handle.signal(2, { target: 'group' })).toBe(true);
+        expect(await handle).toEqual({ kind: 'signaled', signal: 2 });
+        expect(await handle.signal(2, { target: 'group' })).toBe(false);
+      } finally {
+        await close();
+      }
+    });
+  }
   it('signals a suspended Worker and ignores a late command-resolution result', async () => {
     const close = bridge();
     let resolve: ((wasm: Uint8Array) => void) | undefined;
