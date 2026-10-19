@@ -1,0 +1,1516 @@
+{
+  "wasms": {
+    "stack_trace": {
+      "moon": {
+        "project": "test_stack_trace",
+        "artifact": "_build/wasm-gc/debug/build/main/main.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "stack_trace_test": {
+      "moon": {
+        "project": "test_stack_trace",
+        "artifact": "_build/wasm-gc/debug/test/main/main.internal_test.wasm",
+        "command": [
+          "test",
+          "--target",
+          "wasm-gc",
+          "--build-only"
+        ]
+      }
+    },
+    "cli_args": {
+      "moon": {
+        "project": "test_cli_args",
+        "artifact": "_build/wasm-gc/debug/build/main/main.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "read_bytes": {
+      "moon": {
+        "project": "test_read_bytes",
+        "artifact": "_build/wasm-gc/debug/build/main/main.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "os_platform": {
+      "moon": {
+        "project": "test_os_platform_detection",
+        "artifact": "_build/wasm-gc/debug/build/main/main.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "current_exe": {
+      "moon": {
+        "project": "test_current_exe",
+        "artifact": "_build/wasm/debug/test/main/main.blackbox_test.wasm",
+        "command": [
+          "test",
+          "main",
+          "--target",
+          "wasm",
+          "--build-only"
+        ]
+      }
+    },
+    "working_dir": {
+      "moon": {
+        "project": "test_working_directory_instances",
+        "artifact": "_build/wasm/debug/test/moon/working_directory_instances/main/main.blackbox_test.wasm",
+        "command": [
+          "test",
+          "main",
+          "--target",
+          "wasm",
+          "--build-only"
+        ]
+      }
+    },
+    "engine_plain": {
+      "moon": {
+        "project": "test_engine_backend",
+        "artifact": "_build/wasm/debug/build/plain/plain.wasm",
+        "target": "wasm"
+      }
+    },
+    "engine_exit": {
+      "moon": {
+        "project": "test_engine_backend",
+        "artifact": "_build/wasm-gc/debug/build/exit/exit.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "engine_js_string": {
+      "moon": {
+        "project": "test_engine_backend",
+        "artifact": "_build/wasm-gc/debug/build/js_string/js_string.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "engine_time": {
+      "moon": {
+        "project": "test_engine_backend",
+        "artifact": "_build/wasm-gc/debug/build/time/time.wasm",
+        "target": "wasm-gc"
+      }
+    },
+    "engine_js_string_wbtest": {
+      "moon": {
+        "project": "test_engine_backend",
+        "artifact": "_build/wasm-gc/debug/test/js_string/js_string.whitebox_test.wasm",
+        "command": [
+          "test",
+          "js_string",
+          "--target",
+          "wasm-gc",
+          "--build-only"
+        ]
+      }
+    },
+    "engine_ffi_bytes": {
+      "moon": {
+        "project": "test_engine_backend",
+        "artifact": "_build/wasm-gc/debug/build/ffi_bytes/ffi_bytes.wasm",
+        "command": [
+          "build",
+          "ffi_bytes",
+          "--target",
+          "wasm-gc"
+        ],
+        "env": {
+          "MOONC_INTERNAL_PARAMS": "use_ffi_bytes=1|"
+        }
+      }
+    },
+    "async_exit": {
+      "moon": {
+        "project": "test_async_exit",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "async_signal_termination": {
+      "moon": {
+        "project": "test_async_signal_termination",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "async_signal_main": {
+      "moon": {
+        "project": "test_async_signal_main",
+        "artifact": "_build/wasm/debug/build/moon/async_signal_main/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "async_host": {
+      "moon": {
+        "project": "test_async_host",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "async_stdio": {
+      "moon": {
+        "project": "test_async_stdio",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "async_leak_check": {
+      "moon": {
+        "project": "test_async_host_leak_check",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "async_invalid_c_buffer": {
+      "moon": {
+        "project": "test_async_host_invalid_c_buffer",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "memsan_main": {
+      "moon": {
+        "project": "test_memory_sanitizer",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "memsan_duplicate_alloc": {
+      "moon": {
+        "project": "test_memory_sanitizer",
+        "artifact": "_build/wasm/debug/build/duplicate_alloc/duplicate_alloc.wasm",
+        "target": "wasm"
+      }
+    },
+    "memsan_double_free": {
+      "moon": {
+        "project": "test_memory_sanitizer",
+        "artifact": "_build/wasm/debug/build/double_free/double_free.wasm",
+        "target": "wasm"
+      }
+    },
+    "memsan_leak": {
+      "moon": {
+        "project": "test_memory_sanitizer",
+        "artifact": "_build/wasm/debug/build/leak/leak.wasm",
+        "target": "wasm"
+      }
+    },
+    "sqlite_main": {
+      "moon": {
+        "project": "test_sqlite_ffi",
+        "artifact": "_build/wasm/debug/build/main/main.wasm",
+        "target": "wasm"
+      }
+    },
+    "sqlite_leak": {
+      "moon": {
+        "project": "test_sqlite_ffi",
+        "artifact": "_build/wasm/debug/build/leak/leak.wasm",
+        "target": "wasm"
+      }
+    },
+    "sqlite_invalid_handle": {
+      "moon": {
+        "project": "test_sqlite_ffi",
+        "artifact": "_build/wasm/debug/build/invalid_handle/invalid_handle.wasm",
+        "target": "wasm"
+      }
+    },
+    "sqlite_entered_mutex": {
+      "moon": {
+        "project": "test_sqlite_ffi",
+        "artifact": "_build/wasm/debug/build/entered_mutex/entered_mutex.wasm",
+        "target": "wasm"
+      }
+    },
+    "ambient_path": {
+      "moon": {
+        "project": "test_ambient_process_path",
+        "artifact": "_build/wasm/debug/test/moon/ambient_process_path/main/main.blackbox_test.wasm",
+        "command": [
+          "test",
+          "main",
+          "--target",
+          "wasm",
+          "--build-only"
+        ]
+      }
+    },
+    "policy_fs_allow": {
+      "moon": {
+        "project": "test_policy_workspace",
+        "artifact": "_build/wasm/debug/build/moon/policy_workspace/fs_allow/fs_allow.wasm",
+        "target": "wasm"
+      }
+    },
+    "policy_fs_deny_read": {
+      "moon": {
+        "project": "test_policy_workspace",
+        "artifact": "_build/wasm/debug/build/moon/policy_workspace/fs_deny_read/fs_deny_read.wasm",
+        "target": "wasm"
+      }
+    },
+    "policy_env_get": {
+      "moon": {
+        "project": "test_policy_workspace",
+        "artifact": "_build/wasm/debug/build/moon/policy_workspace/env_get/env_get.wasm",
+        "target": "wasm"
+      }
+    },
+    "policy_env_mutate": {
+      "moon": {
+        "project": "test_policy_workspace",
+        "artifact": "_build/wasm/debug/build/moon/policy_workspace/env_mutate/env_mutate.wasm",
+        "target": "wasm"
+      }
+    },
+    "policy_process_env": {
+      "moon": {
+        "project": "test_policy_workspace",
+        "artifact": "_build/wasm/debug/build/moon/policy_workspace/process_env/process_env.wasm",
+        "target": "wasm"
+      }
+    },
+    "policy_listen": {
+      "moon": {
+        "project": "test_policy_workspace",
+        "artifact": "_build/wasm/debug/build/moon/policy_workspace/listen_implicit_bind/listen_implicit_bind.wasm",
+        "target": "wasm"
+      }
+    }
+  },
+  "seeds": {
+    "policy_workspace": [
+      {
+        "from": "test/conformance/mbt/test_policy_workspace/allowed",
+        "to": "allowed"
+      },
+      {
+        "from": "test/conformance/mbt/test_policy_workspace/denied",
+        "to": "denied"
+      },
+      {
+        "from": "test/conformance/mbt/test_policy_workspace/policy.toml",
+        "to": "policy.toml"
+      },
+      {
+        "from": "test/conformance/mbt/test_policy_workspace/deny-all.toml",
+        "to": "deny-all.toml"
+      },
+      {
+        "from": "test/conformance/mbt/test_policy_workspace/process-any-args.toml",
+        "to": "process-any-args.toml"
+      },
+      {
+        "from": "test/conformance/mbt/test_policy_workspace/process-prefix-deny.toml",
+        "to": "process-prefix-deny.toml"
+      }
+    ],
+    "sqlite_policy": [
+      {
+        "from": "test/conformance/mbt/test_sqlite_ffi/policy.toml",
+        "to": "policy.toml"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "cli/version",
+      "area": "cli",
+      "source": "test.rs:test_moonrun_version",
+      "wasm": "cli_args",
+      "argv": [
+        "--version"
+      ],
+      "divergences": [
+        "D5"
+      ]
+    },
+    {
+      "id": "cli/help",
+      "area": "cli",
+      "source": "test.rs:test_moonrun_help_describes_policy_shape",
+      "wasm": "cli_args",
+      "argv": [
+        "--help"
+      ],
+      "divergences": [
+        "D5"
+      ]
+    },
+    {
+      "id": "stack/default",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "stack/generic-int",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>",
+        "--",
+        "abort-generic-int"
+      ]
+    },
+    {
+      "id": "stack/generic-tuple",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>",
+        "--",
+        "abort-generic-tuple"
+      ]
+    },
+    {
+      "id": "stack/method",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>",
+        "--",
+        "abort-method"
+      ]
+    },
+    {
+      "id": "stack/closure",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>",
+        "--",
+        "abort-closure"
+      ]
+    },
+    {
+      "id": "stack/panic-result",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>",
+        "--",
+        "panic-result"
+      ]
+    },
+    {
+      "id": "stack/no-stack-trace",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace",
+      "wasm": "stack_trace",
+      "argv": [
+        "<wasm>",
+        "--no-stack-trace"
+      ]
+    },
+    {
+      "id": "stack/test-block-closure",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace_in_test_blocks",
+      "wasm": "stack_trace_test",
+      "note": "moon passes a trailing \"--\"; index 2 is the closure test",
+      "argv": [
+        "--test-args",
+        "{\"package\":\"username/hello/main\",\"file_and_index\":[[\"main.mbt\",[{\"start\":2,\"end\":3}]]]}",
+        "<wasm>",
+        "--"
+      ]
+    },
+    {
+      "id": "stack/test-block-method",
+      "area": "stack",
+      "source": "test.rs:test_moonrun_wasm_stack_trace_in_test_blocks",
+      "wasm": "stack_trace_test",
+      "argv": [
+        "--test-args",
+        "{\"package\":\"username/hello/main\",\"file_and_index\":[[\"main.mbt\",[{\"start\":1,\"end\":2}]]]}",
+        "<wasm>",
+        "--"
+      ]
+    },
+    {
+      "id": "cli-args/none",
+      "area": "cli",
+      "source": "test.rs:test_moon_run_with_cli_args",
+      "wasm": "cli_args"
+    },
+    {
+      "id": "cli-args/verbatim",
+      "area": "cli",
+      "source": "test.rs:test_moon_run_with_cli_args",
+      "wasm": "cli_args",
+      "argv": [
+        "<wasm>",
+        "--",
+        "中文",
+        "😄👍",
+        "hello",
+        "1242"
+      ]
+    },
+    {
+      "id": "cli-args/after-flag",
+      "area": "cli",
+      "source": "test.rs:test_moon_run_with_cli_args",
+      "wasm": "cli_args",
+      "argv": [
+        "<wasm>",
+        "--no-stack-trace",
+        "--",
+        "--arg1",
+        "--arg2",
+        "arg3"
+      ]
+    },
+    {
+      "id": "current-exe/plain",
+      "area": "cli",
+      "source": "test.rs:test_moonrun_current_exe_absolutizes_relative_module_path",
+      "wasm": "current_exe",
+      "seed": [
+        {
+          "from": "<wasm>",
+          "to": "executable/main.wasm"
+        }
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1",
+        "MOONRUN_TEST_CURRENT_EXE": "<cwd>/executable/main.wasm",
+        "MOONRUN_TEST_CURRENT_EXE_DIR": "<cwd>/executable"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"username/current_exe/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "executable/main.wasm"
+      ]
+    },
+    {
+      "id": "current-exe/unicode",
+      "area": "cli",
+      "source": "test.rs:test_moonrun_current_exe_absolutizes_relative_module_path",
+      "wasm": "current_exe",
+      "seed": [
+        {
+          "from": "<wasm>",
+          "to": "路径-𐀀/程序.wasm"
+        }
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1",
+        "MOONRUN_TEST_CURRENT_EXE": "<cwd>/路径-𐀀/程序.wasm",
+        "MOONRUN_TEST_CURRENT_EXE_DIR": "<cwd>/路径-𐀀"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"username/current_exe/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "路径-𐀀/程序.wasm"
+      ]
+    },
+    {
+      "id": "current-exe/non-utf8",
+      "area": "cli",
+      "source": "test.rs:test_moonrun_current_exe_absolutizes_relative_module_path",
+      "wasm": "current_exe",
+      "seed": [
+        {
+          "from": "<wasm>",
+          "to": "non-utf8-\\xff/module-\\xfe.wasm"
+        }
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1",
+        "MOONRUN_TEST_CURRENT_EXE": "<cwd>/non-utf8-\\xff/module-\\xfe.wasm",
+        "MOONRUN_TEST_CURRENT_EXE_DIR": "<cwd>/non-utf8-\\xff"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"username/current_exe/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "non-utf8-\\xff/module-\\xfe.wasm"
+      ]
+    },
+    {
+      "id": "exit/guest-code-7",
+      "area": "cli",
+      "source": "test.rs:test_moonrun_exits_with_guest_exit_code",
+      "wasm": "cli_args",
+      "argv": [
+        "<wasm>",
+        "--",
+        "exit-7"
+      ]
+    },
+    {
+      "id": "cwd/working-directory-first",
+      "area": "async-kernel",
+      "source": "test.rs:moonrun_observes_each_process_working_directory",
+      "wasm": "working_dir",
+      "files": {
+        "input.txt": "first"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/working_directory_instances/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "cwd/working-directory-second",
+      "area": "async-kernel",
+      "source": "test.rs:moonrun_observes_each_process_working_directory",
+      "wasm": "working_dir",
+      "files": {
+        "input.txt": "second"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/working_directory_instances/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "cli/invalid-module",
+      "area": "cli",
+      "source": "test.rs:moonrun_library_compiles_modules_when_loading",
+      "wasm": {
+        "text": "not WebAssembly"
+      }
+    },
+    {
+      "id": "engine/plain",
+      "area": "legacy",
+      "source": "test.rs:engine_backends_run_both_wasm_profiles_and_js_strings",
+      "wasm": "engine_plain"
+    },
+    {
+      "id": "engine/exit-7",
+      "area": "legacy",
+      "source": "test.rs:engine_backends_run_both_wasm_profiles_and_js_strings",
+      "wasm": "engine_exit"
+    },
+    {
+      "id": "engine/js-string",
+      "area": "legacy",
+      "source": "test.rs:engine_backends_run_both_wasm_profiles_and_js_strings",
+      "wasm": "engine_js_string"
+    },
+    {
+      "id": "engine/time",
+      "area": "legacy",
+      "source": "test.rs:engine_backends_run_both_wasm_profiles_and_js_strings",
+      "wasm": "engine_time"
+    },
+    {
+      "id": "engine/js-string-whitebox-test",
+      "area": "driver",
+      "source": "test.rs:engine_backends_run_both_wasm_profiles_and_js_strings",
+      "wasm": "engine_js_string_wbtest",
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/engine_backend/js_string\",\"file_and_index\":[[\"main_wbtest.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "engine/ffi-bytes",
+      "area": "legacy",
+      "source": "test.rs:engine_backends_run_compiler_generated_ffi_bytes",
+      "wasm": "engine_ffi_bytes"
+    },
+    {
+      "id": "engine/sqlite-adapter",
+      "area": "sqlite",
+      "source": "test.rs:engine_backends_share_the_sqlite_wasm_adapter",
+      "wasm": {
+        "wat": "test/conformance/wat/sqlite-adapter.wat"
+      }
+    },
+    {
+      "id": "engine/js-byte-adapter",
+      "area": "legacy",
+      "source": "test.rs:engine_backends_share_the_js_byte_adapter",
+      "wasm": {
+        "wat": "test/conformance/wat/js-byte-adapter.wat"
+      }
+    },
+    {
+      "id": "engine/memory-sanitizer-adapter",
+      "area": "memsan",
+      "source": "test.rs:engine_backends_share_the_memory_sanitizer_adapter",
+      "wasm": {
+        "wat": "test/conformance/wat/memory-sanitizer-adapter.wat"
+      }
+    },
+    {
+      "id": "engine/async-host-adapter",
+      "area": "async-kernel",
+      "source": "test.rs:engine_backends_share_the_async_host_adapter",
+      "wasm": {
+        "wat": "test/conformance/wat/async-host-adapter.wat"
+      }
+    },
+    {
+      "id": "async/exit-9",
+      "area": "async-kernel",
+      "source": "test.rs:test_moonrun_async_host_exit_returns_guest_exit_code",
+      "wasm": "async_exit"
+    },
+    {
+      "id": "signals/terminate-by-signal",
+      "area": "signals",
+      "source": "test.rs:test_moonrun_async_host_signal_termination_is_scoped_to_wasm_run",
+      "wasm": "async_signal_termination"
+    },
+    {
+      "id": "signals/async-main-sigint",
+      "area": "signals",
+      "source": "test.rs:test_moonrun_async_main_preserves_signal_termination",
+      "wasm": "async_signal_main",
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      },
+      "signal": {
+        "onStdout": "ready\n",
+        "signal": "SIGINT"
+      }
+    },
+    {
+      "id": "stdin/read-bytes-multibyte",
+      "area": "legacy",
+      "source": "test.rs:test_moon_run_with_read_bytes_from_stdin",
+      "wasm": "read_bytes",
+      "stdin": "中文😄👍hello1242"
+    },
+    {
+      "id": "stdin/read-bytes-empty",
+      "area": "legacy",
+      "source": "test.rs:test_moon_run_with_read_bytes_from_stdin",
+      "wasm": "read_bytes",
+      "stdin": ""
+    },
+    {
+      "id": "sys/is-windows",
+      "area": "legacy",
+      "source": "test.rs:test_moon_run_with_is_windows",
+      "wasm": "os_platform"
+    },
+    {
+      "id": "async/host-imports",
+      "area": "async-kernel",
+      "source": "test.rs:test_moon_run_with_async_host_imports",
+      "wasm": "async_host",
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "sqlite/policy-ok",
+      "area": "sqlite",
+      "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
+      "wasm": "sqlite_main",
+      "seed": "sqlite_policy",
+      "dirs": [
+        "allowed",
+        "denied"
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      },
+      "argv": [
+        "--policy",
+        "<cwd>/policy.toml",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "sqlite/leak",
+      "area": "sqlite",
+      "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
+      "wasm": "sqlite_leak",
+      "seed": "sqlite_policy",
+      "dirs": [
+        "allowed",
+        "denied"
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "sqlite/invalid-handle",
+      "area": "sqlite",
+      "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
+      "wasm": "sqlite_invalid_handle",
+      "seed": "sqlite_policy",
+      "dirs": [
+        "allowed",
+        "denied"
+      ]
+    },
+    {
+      "id": "sqlite/entered-mutex",
+      "area": "sqlite",
+      "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
+      "wasm": "sqlite_entered_mutex",
+      "seed": "sqlite_policy",
+      "dirs": [
+        "allowed",
+        "denied"
+      ]
+    },
+    {
+      "id": "async/stdio",
+      "area": "async-kernel",
+      "source": "test.rs:test_moon_run_with_async_stdio_imports",
+      "wasm": "async_stdio",
+      "stdin": "stdio input\n",
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "memsan/main",
+      "area": "memsan",
+      "source": "test.rs:test_moon_run_with_memory_sanitizer_imports",
+      "wasm": "memsan_main"
+    },
+    {
+      "id": "memsan/duplicate-alloc",
+      "area": "memsan",
+      "source": "test.rs:test_moon_run_memory_sanitizer_reports_demangled_alloc_stack",
+      "wasm": "memsan_duplicate_alloc"
+    },
+    {
+      "id": "memsan/double-free",
+      "area": "memsan",
+      "source": "test.rs:test_moon_run_memory_sanitizer_reports_double_free",
+      "wasm": "memsan_double_free"
+    },
+    {
+      "id": "memsan/leak",
+      "area": "memsan",
+      "source": "test.rs:test_moon_run_memory_sanitizer_reports_leaks",
+      "wasm": "memsan_leak"
+    },
+    {
+      "id": "process/ambient-path-lookup",
+      "area": "process",
+      "source": "test.rs:moonrun_ambient_path_lookup_observes_guest_environment_mutation",
+      "wasm": "ambient_path",
+      "seed": [
+        {
+          "from": "<moonrun>",
+          "to": "ambient-path-bin/moonrun-path-command"
+        }
+      ],
+      "env": {
+        "MOONRUN_TEST_PATH": "<cwd>/ambient-path-bin"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/ambient_process_path/main\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "policy/fs-allow",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_fs_allow",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/policy.toml",
+        "<wasm>"
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "policy/env-get",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_env_get",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/policy.toml",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "policy/env-mutate",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_env_mutate",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/policy.toml",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "policy/process-env",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_process_env",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/policy.toml",
+        "<wasm>"
+      ],
+      "env": {
+        "MOONRUN_HIDDEN_ENV": "host secret"
+      }
+    },
+    {
+      "id": "policy/process-env-any-args",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_process_env",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/process-any-args.toml",
+        "<wasm>"
+      ],
+      "env": {
+        "MOONRUN_HIDDEN_ENV": "host secret"
+      }
+    },
+    {
+      "id": "policy/deny-all-env-get",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_env_get",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/deny-all.toml",
+        "<wasm>"
+      ],
+      "env": {
+        "MOONRUN_POLICY_ENV": "host value"
+      }
+    },
+    {
+      "id": "policy/process-prefix-deny",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_process_env",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/process-prefix-deny.toml",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "policy/listen-implicit-bind-denied",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_listen",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/deny-all.toml",
+        "<wasm>"
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "policy/deny-all-process-env",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_process_env",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/deny-all.toml",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "policy/fs-deny-read",
+      "area": "policy",
+      "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
+      "wasm": "policy_fs_deny_read",
+      "seed": "policy_workspace",
+      "argv": [
+        "--policy",
+        "<cwd>/policy.toml",
+        "<wasm>"
+      ],
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "async/leak-check-disabled",
+      "area": "async-kernel",
+      "source": "test.rs:test_moon_run_async_host_leak_check_env",
+      "wasm": "async_leak_check",
+      "unsetEnv": [
+        "MOONBIT_ASYNC_CHECK_FD_LEAK"
+      ]
+    },
+    {
+      "id": "async/leak-check-enabled",
+      "area": "async-kernel",
+      "source": "test.rs:test_moon_run_async_host_leak_check_env",
+      "wasm": "async_leak_check",
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      }
+    },
+    {
+      "id": "async/invalid-c-buffer",
+      "area": "async-kernel",
+      "source": "test.rs:test_moon_run_with_async_host_invalid_c_buffer_traps",
+      "wasm": "async_invalid_c_buffer"
+    },
+    {
+      "id": "outcomes/module-start-trap",
+      "area": "errors",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/module-start-trap.wat"
+      }
+    },
+    {
+      "id": "outcomes/exported-start-trap",
+      "area": "errors",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/exported-start-trap.wat"
+      }
+    },
+    {
+      "id": "outcomes/wasm-exception",
+      "area": "errors",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/wasm-exception.wat"
+      }
+    },
+    {
+      "id": "outcomes/js-string-trap",
+      "area": "errors",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/js-string-trap.wat"
+      },
+      "divergences": [
+        "D6"
+      ]
+    },
+    {
+      "id": "outcomes/test-finish-trap",
+      "area": "driver",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/test-finish-trap.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "outcomes/test-execute-trap",
+      "area": "driver",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/test-execute-trap.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "outcomes/exit-7",
+      "area": "errors",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/exit-7.wat"
+      }
+    },
+    {
+      "id": "outcomes/missing-import",
+      "area": "errors",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/missing-import.wat"
+      }
+    },
+    {
+      "id": "outcomes/module-start-host-error",
+      "area": "memsan",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/module-start-host-error.wat"
+      }
+    },
+    {
+      "id": "outcomes/exported-start-host-error",
+      "area": "memsan",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/exported-start-host-error.wat"
+      }
+    },
+    {
+      "id": "outcomes/test-execute-host-error",
+      "area": "memsan",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/test-execute-host-error.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "outcomes/test-finish-host-error",
+      "area": "memsan",
+      "source": "engine_outcomes.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/test-finish-host-error.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "backends/spawn-stdio-handles-none-zero",
+      "area": "process",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/spawn-stdio-handles.wat",
+        "vars": {
+          "imports": "(import \"moonbitlang/async\" \"process/make_argv_array/unix\" (func $argv (param i32) (result i64))) (import \"moonbitlang/async\" \"thread_pool/spawn_job/unix\" (func $spawn (param i32 i32 i64 i64 i64 i64 i64) (result i64)))",
+          "inputs": "i32.const 0 call $argv i32.const 0 call $env",
+          "flags": "",
+          "stdio": "call $invalid call $invalid call $invalid"
+        }
+      }
+    },
+    {
+      "id": "backends/spawn-stdio-handles-zero-0",
+      "area": "process",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/spawn-stdio-handles.wat",
+        "vars": {
+          "imports": "(import \"moonbitlang/async\" \"process/make_argv_array/unix\" (func $argv (param i32) (result i64))) (import \"moonbitlang/async\" \"thread_pool/spawn_job/unix\" (func $spawn (param i32 i32 i64 i64 i64 i64 i64) (result i64)))",
+          "inputs": "i32.const 0 call $argv i32.const 0 call $env",
+          "flags": "",
+          "stdio": "i64.const 0 call $invalid call $invalid"
+        }
+      }
+    },
+    {
+      "id": "backends/spawn-stdio-handles-zero-1",
+      "area": "process",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/spawn-stdio-handles.wat",
+        "vars": {
+          "imports": "(import \"moonbitlang/async\" \"process/make_argv_array/unix\" (func $argv (param i32) (result i64))) (import \"moonbitlang/async\" \"thread_pool/spawn_job/unix\" (func $spawn (param i32 i32 i64 i64 i64 i64 i64) (result i64)))",
+          "inputs": "i32.const 0 call $argv i32.const 0 call $env",
+          "flags": "",
+          "stdio": "call $invalid i64.const 0 call $invalid"
+        }
+      }
+    },
+    {
+      "id": "backends/spawn-stdio-handles-zero-2",
+      "area": "process",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/spawn-stdio-handles.wat",
+        "vars": {
+          "imports": "(import \"moonbitlang/async\" \"process/make_argv_array/unix\" (func $argv (param i32) (result i64))) (import \"moonbitlang/async\" \"thread_pool/spawn_job/unix\" (func $spawn (param i32 i32 i64 i64 i64 i64 i64) (result i64)))",
+          "inputs": "i32.const 0 call $argv i32.const 0 call $env",
+          "flags": "",
+          "stdio": "call $invalid call $invalid i64.const 0"
+        }
+      }
+    },
+    {
+      "id": "backends/process-result-rejects-zero-handle",
+      "area": "process",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/process-result-handles.wat",
+        "vars": {
+          "pid": "1",
+          "badf": "9",
+          "child": "10"
+        }
+      }
+    },
+    {
+      "id": "backends/current-exe-import-current_exe",
+      "area": "async-kernel",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/current-exe-missing-origin.wat",
+        "vars": {
+          "import": "env/current_exe"
+        }
+      },
+      "note": "in the library test the module has no origin; the CLI always has one"
+    },
+    {
+      "id": "backends/current-exe-import-current_exe_dir",
+      "area": "async-kernel",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/current-exe-missing-origin.wat",
+        "vars": {
+          "import": "env/current_exe_dir"
+        }
+      },
+      "note": "in the library test the module has no origin; the CLI always has one"
+    },
+    {
+      "id": "backends/nullable-imports",
+      "area": "async-kernel",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/nullable-handles.wat"
+      }
+    },
+    {
+      "id": "backends/tls-free-rejects-zero-handle",
+      "area": "tls",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/invalid-tls-handle.wat"
+      }
+    },
+    {
+      "id": "backends/worker-owned-completion-pipe",
+      "area": "async-kernel",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/worker-completion-pipe.wat"
+      },
+      "env": {
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
+      },
+      "timeoutMs": 10000
+    },
+    {
+      "id": "backends/plain",
+      "area": "legacy",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/plain.wat"
+      }
+    },
+    {
+      "id": "backends/spectest-read-char",
+      "area": "legacy",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/spectest-read-char.wat"
+      },
+      "stdin": "λ"
+    },
+    {
+      "id": "backends/js-string-builtins",
+      "area": "legacy",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/js-strings.wat"
+      }
+    },
+    {
+      "id": "backends/test-driver-string-bridge",
+      "area": "driver",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/test-driver-string-bridge.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ]
+    },
+    {
+      "id": "backends/repeated-imports",
+      "area": "legacy",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/repeated-imports.wat"
+      }
+    },
+    {
+      "id": "backends/start-host-error",
+      "area": "errors",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/start-host-error.wat"
+      },
+      "note": "wasmtime-feature test; the reference binary is V8"
+    },
+    {
+      "id": "backends/invalid-byte-handle",
+      "area": "errors",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/invalid-byte-handle.wat",
+        "vars": {
+          "path": "invalid-bytes.bin"
+        }
+      },
+      "note": "wasmtime-feature test; the reference binary is V8"
+    },
+    {
+      "id": "backends/denied-invalid-byte-handle",
+      "area": "policy",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/denied-invalid-byte-handle.wat"
+      },
+      "files": {
+        "policy.toml": ""
+      },
+      "argv": [
+        "<wasm>",
+        "--policy",
+        "<cwd>/policy.toml"
+      ],
+      "note": "wasmtime-feature test; the reference binary is V8"
+    },
+    {
+      "id": "backends/run-host-error",
+      "area": "errors",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/run-host-error.wat"
+      },
+      "note": "wasmtime-feature test; the reference binary is V8"
+    },
+    {
+      "id": "backends/bridge-test-execute-host-error",
+      "area": "errors",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/bridge-test-execute-host-error.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[[\"main_test.mbt\",[{\"start\":0,\"end\":1}]]]}",
+        "<wasm>"
+      ],
+      "note": "wasmtime-feature test; the reference binary is V8"
+    },
+    {
+      "id": "backends/bridge-test-finish-host-error",
+      "area": "errors",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/bridge-test-finish-host-error.wat"
+      },
+      "argv": [
+        "--test-args",
+        "{\"package\":\"moon/core\",\"file_and_index\":[]}",
+        "<wasm>"
+      ],
+      "note": "wasmtime-feature test; the reference binary is V8"
+    },
+    {
+      "id": "backends/wasi-stdio",
+      "area": "wasi",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/wasi-stdio.wat"
+      },
+      "stdin": "wasi stdio\n"
+    },
+    {
+      "id": "backends/wasi-surface",
+      "area": "policy",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/wasi-surface.wat"
+      },
+      "files": {
+        "policy.json": "{}"
+      },
+      "argv": [
+        "--policy",
+        "<cwd>/policy.json",
+        "<wasm>",
+        "--",
+        "alpha"
+      ]
+    },
+    {
+      "id": "backends/wasi-proc-exit",
+      "area": "wasi",
+      "source": "engine_backends.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/wasi-proc-exit.wat"
+      }
+    },
+    {
+      "id": "native/utf16-strings-and-builders",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-strings.wat"
+      }
+    },
+    {
+      "id": "native/byte-builders",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-byte-builders.wat"
+      }
+    },
+    {
+      "id": "native/byte-operations",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-byte-ops.wat"
+      }
+    },
+    {
+      "id": "native/byte-memory-growth",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-byte-memory.wat"
+      }
+    },
+    {
+      "id": "native/array-helpers",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-array-helpers.wat"
+      }
+    },
+    {
+      "id": "native/host-exception-tag",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-host-exception.wat"
+      }
+    },
+    {
+      "id": "native/fractional-slice-indices",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-fractional-slices.wat"
+      }
+    },
+    {
+      "id": "native/invalid-handle-0",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-invalid-handles.wat",
+        "vars": {
+          "operation": "i32.const -1 call $new drop"
+        }
+      }
+    },
+    {
+      "id": "native/invalid-handle-1",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-invalid-handles.wat",
+        "vars": {
+          "operation": "ref.null extern i32.const 0 call $get drop"
+        }
+      }
+    },
+    {
+      "id": "native/invalid-handle-2",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-invalid-handles.wat",
+        "vars": {
+          "operation": "call $builder call $read drop"
+        }
+      }
+    },
+    {
+      "id": "native/invalid-handle-3",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-invalid-handles.wat",
+        "vars": {
+          "operation": "call $builder call $finish_bytes drop"
+        }
+      }
+    },
+    {
+      "id": "native/invalid-handle-4",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-invalid-handles.wat",
+        "vars": {
+          "operation": "local.get $a i32.const -1 local.get $a i32.const 0 i32.const 0 call $copy"
+        }
+      }
+    },
+    {
+      "id": "native/invalid-handle-5",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-invalid-handles.wat",
+        "vars": {
+          "operation": "local.get $a i32.const 2 local.get $a i32.const 0 i32.const 1 call $copy"
+        }
+      }
+    },
+    {
+      "id": "native/byte-to-string-large",
+      "area": "legacy",
+      "source": "v8_native_imports.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/native-byte-to-string.wat"
+      }
+    }
+  ]
+}

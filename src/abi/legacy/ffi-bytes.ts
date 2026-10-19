@@ -43,8 +43,10 @@ export const ffiBytes: ImportFamily = () => {
       return new Uint8Array(length);
     }),
     get: fn(['externref', 'i32'], 'i32', (b, index) => bytes(b)[index] ?? 0),
-    set: fn(['externref', 'i32', 'i32'], 'void', (b, index, v) => {
+    // Returns the assigned value, like the JS assignment moonrun performs.
+    set: fn(['externref', 'i32', 'i32'], 'i32', (b, index, v) => {
       bytes(b)[index] = v;
+      return v;
     }),
     copy: fn(
       ['externref', 'i32', 'externref', 'i32', 'i32'],
@@ -61,10 +63,11 @@ export const ffiBytes: ImportFamily = () => {
         destination.set(source.subarray(s, e), d);
       },
     ),
-    fill: fn(['externref', 'i32', 'i32', 'i32'], 'void', (b, start, v, len) => {
+    // Returns the array, like `Uint8Array.prototype.fill`.
+    fill: fn(['externref', 'i32', 'i32', 'i32'], 'externref', (b, start, v, len) => {
       const a = bytes(b);
       const [s, e] = range(start, len, a.length);
-      a.fill(v & 0xff, s, e);
+      return a.fill(v & 0xff, s, e);
     }),
     length: fn(['externref'], 'i32', (b) => bytes(b).length),
     equals: fn(['externref', 'externref'], 'i32', (a, b) => {
