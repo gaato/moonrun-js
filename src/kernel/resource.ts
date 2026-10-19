@@ -2,7 +2,9 @@ import { err, ok, type Result } from '../ports/result.ts';
 import type { CompletionSource } from './completion.ts';
 import type { AsyncError } from './errors.ts';
 import { BADF, INVAL } from './errors.ts';
+import type { HostFile } from './file.ts';
 import { canonical, type Handle, type HostKeys } from './handles.ts';
+import type { Inotify } from './inotify.ts';
 import type { PipeEnd } from './pipe.ts';
 import type { Pollable } from './readiness.ts';
 
@@ -21,7 +23,11 @@ export type Resource =
   /** `asyncWriter`: the async write end of `fd_util/pipe`, the only end a Worker may notify through. */
   | { readonly kind: 'pipe'; readonly end: PipeEnd; readonly asyncWriter: boolean }
   /** The guest's reading view of the thread pool's Completion Source. */
-  | { readonly kind: 'completion-source'; readonly source: CompletionSource };
+  | { readonly kind: 'completion-source'; readonly source: CompletionSource }
+  /** A host file descriptor opened by an open Job (files, directories, devices, FIFOs). */
+  | { readonly kind: 'file'; readonly file: HostFile }
+  /** `fs/inotify/create`. */
+  | { readonly kind: 'inotify'; readonly inotify: Inotify };
 
 /** The poll target of a resource, or `undefined` when epoll would refuse it (`EPERM`). */
 export function pollableOf(resource: Resource): Pollable | undefined {
@@ -30,8 +36,13 @@ export function pollableOf(resource: Resource): Pollable | undefined {
       return resource.end;
     case 'completion-source':
       return resource.source;
+    case 'inotify':
+      return resource.inotify;
     case 'invalid':
     case 'stdio':
+    // Opened files take the thread pool (regular files and directories cannot be
+    // polled; FIFOs and terminals opened by path diverge, D14).
+    case 'file':
       // Stdio goes through the thread pool (`is_async: false`); the embedding process
       // owns its blocking mode, so moonrun-js never polls it.
       return undefined;
@@ -44,6 +55,12 @@ function releaseResource(resource: Resource): void {
     case 'pipe':
       resource.end.release();
       return;
+    case 'file':
+      resource.file.release();
+      return;
+    case 'inotify':
+      resource.inotify.close();
+      return;
     case 'invalid':
     case 'stdio':
     case 'completion-source':
@@ -55,13 +72,18 @@ function releaseResource(resource: Resource): void {
 export function acquire(resource: Resource): Resource {
   if (resource.kind === 'pipe') {
     resource.end.retain();
+  } else if (resource.kind === 'file') {
+    resource.file.retain();
   }
   return resource;
 }
 
 /** Ends an in-flight Job's hold on a resource. */
 export function relinquish(resource: Resource): void {
-  releaseResource(resource);
+  // An inotify instance is not reference counted: the guest's close ends it.
+  if (resource.kind !== 'inotify') {
+    releaseResource(resource);
+  }
 }
 
 /**

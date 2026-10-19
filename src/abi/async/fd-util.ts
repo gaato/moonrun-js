@@ -1,31 +1,11 @@
-import type { FdKind } from '../../kernel/async-kernel.ts';
 import { FAULT } from '../../kernel/errors.ts';
+import { fileKindCode } from '../../kernel/file.ts';
 import { ok } from '../../ports/result.ts';
 import { type AsyncEnv, AsyncFailure, bool, handle, status, zeroOrMinusOne } from './env.ts';
 import { checkedAdd } from './guest-data.ts';
 import type { HandlerGroup } from './types.ts';
 
-/** async's `FileKind` numbering (moonrun `FILE_KIND_*`). */
-export function fileKindCode(kind: FdKind): number {
-  switch (kind) {
-    case 'unknown':
-      return 0;
-    case 'regular':
-      return 1;
-    case 'directory':
-      return 2;
-    case 'symlink':
-      return 3;
-    case 'socket':
-      return 4;
-    case 'pipe':
-      return 5;
-    case 'block-device':
-      return 6;
-    case 'char-device':
-      return 7;
-  }
-}
+export { fileKindCode };
 
 /** The wasm `FileTime` record: three (i64 seconds, i32 nanoseconds) pairs at 16-byte strides. */
 const FILE_TIME_RECORD_LEN = 48;

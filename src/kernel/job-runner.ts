@@ -1,7 +1,10 @@
+import type { FilePort, HostFd } from '../ports/files.ts';
 import type { HostErrorCode } from '../ports/result.ts';
 import type { StdioPort } from '../ports/stdio.ts';
-import { type AsyncError, BADF, IO, native } from './errors.ts';
-import type { Job } from './job.ts';
+import { type AsyncError, BADF, INVAL, IO, native } from './errors.ts';
+import type { FileLocks, HostFile } from './file.ts';
+import { startFilesystemJob } from './fs-jobs.ts';
+import type { FilesystemPayload, Job } from './job.ts';
 import type { PipeEnd } from './pipe.ts';
 import type { Scheduler, Timer } from './scheduler.ts';
 
@@ -9,6 +12,17 @@ import type { Scheduler, Timer } from './scheduler.ts';
 export interface JobEnvironment {
   readonly scheduler: Scheduler;
   readonly stdio: StdioPort;
+  readonly files: FilePort;
+  readonly locks: FileLocks;
+  /** Wraps a descriptor an open Job produced; the Run closes it with its last holder. */
+  adoptFile(fd: HostFd, path: string): HostFile;
+  /** A lock identity for a resource without a host descriptor. */
+  lockKeyOf(owner: object): string;
+  /**
+   * Host Filesystem authorization (moonrun `filesystem::Job::check_policy`), consulted
+   * before a Filesystem Job touches the host; `undefined` allows it.
+   */
+  authorize(payload: FilesystemPayload): AsyncError | undefined;
 }
 
 /** A started Job. `done` is called exactly once, possibly before `startJob` returns. */
@@ -48,7 +62,35 @@ export function startJob(job: Job, env: JobEnvironment, done: () => void): Execu
       return streamRead(job, payload, env, done);
     case 'stream-write':
       return streamWrite(job, payload, env, done);
+    default:
+      return startFilesystemJob(job, payload, env, done);
   }
+}
+
+/** `read_job_worker`/`write_job_worker` on an opened file: `read`/`pread`, `write`/`pwrite`. */
+function fileIo(
+  job: Job,
+  done: () => void,
+  io: () => Promise<{ ok: true; value: number } | { ok: false; error: { code: HostErrorCode } }>,
+  onRead?: (n: number) => void,
+): Execution {
+  io().then(
+    (r) => {
+      if (r.ok) {
+        onRead?.(r.value);
+        job.succeed(r.value);
+      } else {
+        job.fail(native(r.error.code));
+      }
+      done();
+    },
+    () => {
+      job.fail(IO);
+      done();
+    },
+  );
+  // Regular-file I/O completes regardless of a cancellation signal (D14 for FIFOs).
+  return FINISHED;
 }
 
 /** `sleep_job_worker`: `nanosleep` outside a cancellable region, so a signal ends it early. */
@@ -76,6 +118,18 @@ type WritePayload = Extract<Job['payload'], { kind: 'stream-write' }>;
 
 function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: () => void) {
   const resource = payload.resource;
+  if (resource.kind === 'file') {
+    const buffer = new Uint8Array(payload.len);
+    const position = payload.position >= 0n ? payload.position : undefined;
+    return fileIo(
+      job,
+      done,
+      () => env.files.async.read(resource.file.fd, buffer, position),
+      (n) => {
+        payload.result = buffer.subarray(0, n);
+      },
+    );
+  }
   // Streams have no offset: pread/pwrite on a pipe or terminal fail with ESPIPE.
   if (payload.position >= 0n) {
     job.fail(native('ESPIPE'));
@@ -101,6 +155,10 @@ function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: (
     }
     case 'pipe':
       return pipeRead(job, payload, resource.end, done);
+    case 'inotify':
+      job.fail(INVAL);
+      done();
+      return FINISHED;
     case 'invalid':
     case 'completion-source':
       job.fail(BADF);
@@ -153,6 +211,10 @@ function pipeRead(job: Job, payload: ReadPayload, end: PipeEnd, done: () => void
 
 function streamWrite(job: Job, payload: WritePayload, env: JobEnvironment, done: () => void) {
   const resource = payload.resource;
+  if (resource.kind === 'file') {
+    const position = payload.position >= 0n ? payload.position : undefined;
+    return fileIo(job, done, () => env.files.async.write(resource.file.fd, payload.data, position));
+  }
   // Streams have no offset: pread/pwrite on a pipe or terminal fail with ESPIPE.
   if (payload.position >= 0n) {
     job.fail(native('ESPIPE'));
@@ -179,6 +241,10 @@ function streamWrite(job: Job, payload: WritePayload, env: JobEnvironment, done:
     }
     case 'pipe':
       return pipeWrite(job, payload, resource.end, done);
+    case 'inotify':
+      job.fail(INVAL);
+      done();
+      return FINISHED;
     case 'invalid':
     case 'completion-source':
       job.fail(BADF);

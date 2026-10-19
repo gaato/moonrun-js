@@ -1,10 +1,24 @@
+import type { FilePort, HostFd } from '../ports/files.ts';
 import { err, type HostErrorCode, ok, type Result } from '../ports/result.ts';
 import type { StdioPort } from '../ports/stdio.ts';
 import { CBuffers } from './c-buffers.ts';
 import { CompletionSource } from './completion.ts';
 import { type AsyncError, BADF, FAULT, INVAL, IO, native } from './errors.ts';
+import {
+  type FdKind,
+  FileLocks,
+  fdKindOfMode,
+  fileKindCode,
+  HostFile,
+  inodeKey,
+  STAT_DEVICE_ID,
+  STAT_FILE_ID,
+  STAT_FILE_KIND,
+} from './file.ts';
+import { lockOwner } from './fs-jobs.ts';
 import { type Handle, Handles, HostKeys } from './handles.ts';
-import type { JobPayload } from './job.ts';
+import { Inotify } from './inotify.ts';
+import type { FilesystemPayload, JobPayload } from './job.ts';
 import { makePipe } from './pipe.ts';
 import { Poller } from './poller.ts';
 import { EPOLLIN, EPOLLOUT, EPOLLRDHUP } from './readiness.ts';
@@ -13,22 +27,20 @@ import type { Scheduler } from './scheduler.ts';
 import { RunSignals } from './signals.ts';
 import { type CancellationOutcome, ThreadPool } from './thread-pool.ts';
 
-/** File types as `fstat` reports them (moonrun `kind_of_fd`). */
-export type FdKind =
-  | 'unknown'
-  | 'regular'
-  | 'directory'
-  | 'symlink'
-  | 'socket'
-  | 'pipe'
-  | 'block-device'
-  | 'char-device';
+export type { FdKind } from './file.ts';
 
 export interface AsyncKernelOptions {
   readonly stdio: StdioPort;
   readonly scheduler: Scheduler;
   /** `fstat` of a process standard stream. */
   readonly stdioKind: (stream: StdioStream) => Result<FdKind, AsyncError>;
+  /** Host files for Filesystem Jobs. */
+  readonly files: FilePort;
+  /**
+   * Host Filesystem authorization of a Filesystem Job before it runs (the seam for
+   * `--policy`); allows everything when absent.
+   */
+  readonly authorizeFilesystem?: (payload: FilesystemPayload) => AsyncError | undefined;
 }
 
 /** The thread pool's binding to one poll instance (moonrun `ThreadPoolRegistration`). */
@@ -37,6 +49,10 @@ interface PoolRegistration {
   readonly source: CompletionSource;
   readonly sourceHandle: Handle;
   readonly sourceResource: Resource;
+}
+
+function fileKind(kind: FdKind | undefined): number {
+  return kind === undefined ? 0 : fileKindCode(kind);
 }
 
 function syscallError(e: unknown): AsyncError {
@@ -57,6 +73,10 @@ export class AsyncKernel {
   readonly cBuffers: CBuffers;
   readonly pool: ThreadPool;
   readonly signals = new RunSignals();
+  /** `flock` locks of this Run. */
+  readonly locks = new FileLocks();
+  readonly #lockKeys = new WeakMap<object, string>();
+  #nextLockKey = 0;
   /** `errno` as `os_error/get_errno` reports it. */
   errno = 0;
   readonly #polls: Handles<Poller>;
@@ -70,9 +90,16 @@ export class AsyncKernel {
     this.resources = new ResourceTable(this.keys);
     this.cBuffers = new CBuffers(this.keys);
     this.#polls = new Handles(this.keys, 'poll');
+    const authorize = options.authorizeFilesystem ?? (() => undefined);
     this.pool = new ThreadPool(this.keys, {
       scheduler: options.scheduler,
       stdio: options.stdio,
+      files: options.files,
+      locks: this.locks,
+      cBuffers: this.cBuffers,
+      adoptFile: (fd, path) => this.#adoptFile(fd, path),
+      lockKeyOf: (owner) => this.#lockKeyOf(owner),
+      authorize,
     });
   }
 
@@ -293,6 +320,13 @@ export class AsyncKernel {
       case 'pipe':
       case 'completion-source':
         return ok('pipe');
+      case 'file': {
+        const stat = this.#options.files.fstat(value.file.fd);
+        return stat.ok ? ok(fdKindOfMode(stat.value.mode)) : err(native(stat.error.code));
+      }
+      case 'inotify':
+        // An anonymous inode: `st_mode` has no file type.
+        return ok('unknown');
       case 'invalid':
         return err(BADF);
     }
@@ -327,6 +361,12 @@ export class AsyncKernel {
         }
       case 'completion-source':
         return err(native('EAGAIN'));
+      case 'file': {
+        const r = this.#options.files.read(value.file.fd, dst);
+        return r.ok ? r : err(native(r.error.code));
+      }
+      case 'inotify':
+        return err(INVAL);
       case 'invalid':
         return err(BADF);
     }
@@ -359,9 +399,150 @@ export class AsyncKernel {
         }
       case 'completion-source':
         return err(native('EBADF'));
+      case 'file': {
+        const r = this.#options.files.write(value.file.fd, src);
+        return r.ok ? r : err(native(r.error.code));
+      }
+      case 'inotify':
+        return err(INVAL);
       case 'invalid':
         return err(BADF);
     }
+  }
+
+  // ----- filesystem -----
+
+  /** `open_job_get_fd`: publishes the opened file once; later calls return the same handle. */
+  openJobFd(job: Handle): Result<Handle, AsyncError> {
+    const result = this.#openResult(job);
+    if (!result.ok) {
+      return result;
+    }
+    const opened = result.value.opened;
+    if (opened.state === 'published') {
+      return ok(opened.handle);
+    }
+    const handle = this.resources.insert({ kind: 'file', file: opened.file });
+    result.value.opened = { state: 'published', handle };
+    return ok(handle);
+  }
+
+  /**
+   * The compat open getters read the packed identity slot: zero when the property
+   * was requested but unavailable, `Inval` when not requested.
+   */
+  openJobProperty(job: Handle, property: 'kind' | 'dev' | 'ino'): Result<bigint, AsyncError> {
+    const result = this.#openResult(job);
+    if (!result.ok) {
+      return result;
+    }
+    const payload = this.pool.job(job);
+    if (!payload.ok || payload.value.payload.kind !== 'open') {
+      return err(BADF);
+    }
+    const mask = payload.value.payload.request.mask;
+    const stat = result.value.stat;
+    switch (property) {
+      case 'kind':
+        return mask & STAT_FILE_KIND ? ok(BigInt(fileKind(stat.kind))) : err(INVAL);
+      case 'dev':
+        return mask & STAT_DEVICE_ID ? ok(stat.deviceId ?? 0n) : err(INVAL);
+      case 'ino':
+        return mask & STAT_FILE_ID ? ok(stat.fileId ?? 0n) : err(INVAL);
+    }
+  }
+
+  #openResult(job: Handle) {
+    const found = this.pool.job(job);
+    if (!found.ok) {
+      return found;
+    }
+    const payload = found.value.payload;
+    if (payload.kind !== 'open') {
+      return err(BADF);
+    }
+    return payload.result === undefined ? err(INVAL) : ok(payload.result);
+  }
+
+  /** `fs/try_lock_file`: a `LOCK_NB` flock; a conflict is `EWOULDBLOCK`. */
+  tryLockFile(fd: Handle, exclusive: boolean): Result<void, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    const key = this.#lockKey(resource.value);
+    if (!key.ok) {
+      return key;
+    }
+    return this.locks.tryLock(key.value, lockOwner(resource.value), exclusive)
+      ? ok(undefined)
+      : err(native('EAGAIN'));
+  }
+
+  unlockFile(fd: Handle): Result<void, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    const key = this.#lockKey(resource.value);
+    if (!key.ok) {
+      return key;
+    }
+    this.locks.unlock(key.value, lockOwner(resource.value));
+    return ok(undefined);
+  }
+
+  /** `fs/inotify/create`. */
+  inotifyCreate(): Handle {
+    return this.resources.insert({ kind: 'inotify', inotify: new Inotify(this.#options.files) });
+  }
+
+  inotify(fd: Handle): Result<Inotify, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    return resource.value.kind === 'inotify' ? ok(resource.value.inotify) : err(INVAL);
+  }
+
+  #lockKey(resource: Resource): Result<string, AsyncError> {
+    let fd: HostFd | undefined;
+    if (resource.kind === 'file') {
+      if (resource.file.lockKey !== undefined) {
+        return ok(resource.file.lockKey);
+      }
+      fd = resource.file.fd;
+    } else if (resource.kind === 'stdio') {
+      fd = resource.stream as HostFd;
+    }
+    if (fd === undefined) {
+      return ok(this.#lockKeyOf(lockOwner(resource)));
+    }
+    const stat = this.#options.files.fstat(fd);
+    if (!stat.ok) {
+      return err(native(stat.error.code));
+    }
+    const key = inodeKey(stat.value);
+    if (resource.kind === 'file') {
+      resource.file.lockKey = key;
+    }
+    return ok(key);
+  }
+
+  #lockKeyOf(owner: object): string {
+    let key = this.#lockKeys.get(owner);
+    if (key === undefined) {
+      key = `object:${this.#nextLockKey++}`;
+      this.#lockKeys.set(owner, key);
+    }
+    return key;
+  }
+
+  #adoptFile(fd: HostFd, path: string): HostFile {
+    return new HostFile(fd, path, (file) => {
+      this.locks.releaseOwner(file);
+      this.#options.files.close(file.fd);
+    });
   }
 
   // ----- lifecycle -----

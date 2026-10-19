@@ -9,6 +9,7 @@ import type { RunContext } from '../../src/abi/context.ts';
 import type { FunctionImport } from '../../src/abi/define.ts';
 import { GuestMemory } from '../../src/abi/memory.ts';
 import { ASYNC_IMPORTS } from '../../src/generated/async-imports.ts';
+import { nodeFiles } from '../../src/hosts/node/files.ts';
 import { AsyncKernel } from '../../src/kernel/async-kernel.ts';
 import { NULL_HANDLE } from '../../src/kernel/handles.ts';
 import { EPOLLERR, EPOLLHUP, EPOLLIN, EPOLLOUT, EPOLLRDHUP } from '../../src/kernel/readiness.ts';
@@ -21,6 +22,7 @@ function setup() {
     stdio: memoryStdio(),
     scheduler: new FakeScheduler(),
     stdioKind: () => ok('char-device'),
+    files: nodeFiles(),
   });
   const memory = new GuestMemory();
   memory.bind(new WebAssembly.Memory({ initial: 1 }));

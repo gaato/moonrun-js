@@ -1,4 +1,5 @@
 import { err, ok, type Result } from '../ports/result.ts';
+import type { CBuffers } from './c-buffers.ts';
 import type { CompletionSource } from './completion.ts';
 import { type AsyncError, BADF, INVAL } from './errors.ts';
 import { type Handle, Handles, type HostKeys } from './handles.ts';
@@ -6,6 +7,11 @@ import { Job, type JobPayload, type JobSlot } from './job.ts';
 import { type Execution, type JobEnvironment, startJob } from './job-runner.ts';
 import type { PipeEnd } from './pipe.ts';
 import { relinquish } from './resource.ts';
+
+/** What the pool needs besides the Job environment: c_buffer leases and published results. */
+export interface PoolEnvironment extends JobEnvironment {
+  readonly cBuffers: CBuffers;
+}
 
 /** Where a Worker announces finished Jobs (moonrun `WorkerCompletionDestination`). */
 export type CompletionTarget =
@@ -59,9 +65,11 @@ class Worker {
 export class ThreadPool {
   readonly #jobs: Handles<JobSlot>;
   readonly #workers: Handles<Worker>;
-  readonly #env: JobEnvironment;
+  readonly #env: PoolEnvironment;
+  /** Payloads whose resource holds and buffer leases already ended. */
+  readonly #settled = new WeakSet<JobPayload>();
 
-  constructor(keys: HostKeys, env: JobEnvironment) {
+  constructor(keys: HostKeys, env: PoolEnvironment) {
     this.#jobs = new Handles(keys, 'job');
     this.#workers = new Handles(keys, 'worker');
     this.#env = env;
@@ -83,9 +91,42 @@ export class ThreadPool {
       return err(BADF);
     }
     if (slot.state !== 'reserved') {
-      releasePayload(slot.job.payload);
+      this.#discard(slot.job.payload);
     }
     return ok(undefined);
+  }
+
+  /**
+   * Ends what a Job holds once it has run (moonrun drops the Job's `ResourceRef` after
+   * `run` and restores the readdir buffer lease with the result).
+   */
+  #settle(payload: JobPayload): void {
+    if (this.#settled.has(payload)) {
+      return;
+    }
+    this.#settled.add(payload);
+    releasePayload(payload, this.#env.cBuffers);
+  }
+
+  /** A Job leaves the table: its holds, its unclaimed results and its published c_buffer. */
+  #discard(payload: JobPayload): void {
+    this.#settle(payload);
+    switch (payload.kind) {
+      case 'open':
+        if (payload.result?.opened.state === 'unpublished') {
+          payload.result.opened.file.release();
+          payload.result = undefined;
+        }
+        return;
+      case 'realpath':
+        // Native realpath frees the resolved path in the Job finalizer.
+        if (payload.result?.state === 'published') {
+          this.#env.cBuffers.free(payload.result.handle);
+        }
+        return;
+      default:
+        return;
+    }
   }
 
   /** `run_job`: runs a Job on the guest's own thread. */
@@ -94,7 +135,10 @@ export class ThreadPool {
     if (!job.ok) {
       return job;
     }
-    startJob(job.value, this.#env, () => this.#restore(handle, job.value));
+    startJob(job.value, this.#env, () => {
+      this.#settle(job.value.payload);
+      this.#restore(handle, job.value);
+    });
     return ok(undefined);
   }
 
@@ -236,7 +280,7 @@ export class ThreadPool {
     if (this.#jobs.get(handle)?.state === 'reserved') {
       this.#jobs.set(handle, { state: 'result-ready', job });
     } else {
-      releasePayload(job.payload);
+      this.#discard(job.payload);
     }
   }
 
@@ -244,7 +288,7 @@ export class ThreadPool {
     if (this.#jobs.get(assignment.jobHandle)?.state === 'reserved') {
       this.#jobs.set(assignment.jobHandle, { state: 'ready', job: assignment.job });
     } else {
-      releasePayload(assignment.job.payload);
+      this.#discard(assignment.job.payload);
     }
   }
 
@@ -258,6 +302,7 @@ export class ThreadPool {
   }
 
   #finish(worker: Worker, assignment: Assignment): void {
+    this.#settle(assignment.job.payload);
     this.#restore(assignment.jobHandle, assignment.job);
     const stopped = worker.state.kind === 'stopped';
     if (stopped) {
@@ -308,15 +353,41 @@ export class ThreadPool {
   }
 }
 
-/** Ends a Job's holds on the resources its payload acquired. */
-function releasePayload(payload: JobPayload): void {
+/** Ends a Job's holds on the resources its payload acquired and returns its buffer lease. */
+function releasePayload(payload: JobPayload, cBuffers: CBuffers): void {
   switch (payload.kind) {
     case 'stream-read':
     case 'stream-write':
+    case 'fstatx':
+    case 'file-size':
+    case 'file-time':
+    case 'fsync':
+    case 'flock':
+    case 'inotify-add-watch':
       relinquish(payload.resource);
+      return;
+    case 'readdir':
+      relinquish(payload.resource);
+      cBuffers.restore(payload.buffer.handle, payload.buffer.bytes);
+      return;
+    case 'statx':
+    case 'file-kind-by-path':
+      if (payload.parent !== undefined) {
+        relinquish(payload.parent);
+      }
       return;
     case 'failed':
     case 'sleep':
+    case 'open':
+    case 'file-time-by-path':
+    case 'access':
+    case 'chmod':
+    case 'remove':
+    case 'rename':
+    case 'symlink':
+    case 'mkdir':
+    case 'rmdir':
+    case 'realpath':
       return;
   }
 }

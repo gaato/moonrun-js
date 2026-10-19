@@ -54,7 +54,16 @@ export type HostErrorCode =
   | 'EINPROGRESS'
   | 'ECANCELED'
   | 'ESRCH'
-  | 'ECHILD';
+  | 'ECHILD'
+  | 'ENXIO'
+  | 'ENODEV'
+  | 'ENFILE'
+  | 'ETXTBSY'
+  | 'EFBIG'
+  | 'EMLINK'
+  | 'ENOLCK'
+  | 'EOVERFLOW'
+  | 'EDQUOT';
 
 export interface HostError {
   readonly code: HostErrorCode;

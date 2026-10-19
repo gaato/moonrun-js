@@ -41,6 +41,15 @@ export const LINUX_ERRNO: Readonly<Record<HostErrorCode, number>> = {
   EALREADY: 114,
   EINPROGRESS: 115,
   ECANCELED: 125,
+  ENXIO: 6,
+  ENODEV: 19,
+  ENFILE: 23,
+  ETXTBSY: 26,
+  EFBIG: 27,
+  EMLINK: 31,
+  ENOLCK: 37,
+  EOVERFLOW: 75,
+  EDQUOT: 122,
 };
 
 /** glibc `strerror` texts, which is what Rust's `io::Error` prints for an OS error. */
@@ -84,6 +93,15 @@ const STRERROR: Readonly<Record<HostErrorCode, string>> = {
   EALREADY: 'Operation already in progress',
   EINPROGRESS: 'Operation now in progress',
   ECANCELED: 'Operation canceled',
+  ENXIO: 'No such device or address',
+  ENODEV: 'No such device',
+  ENFILE: 'Too many open files in system',
+  ETXTBSY: 'Text file busy',
+  EFBIG: 'File too large',
+  EMLINK: 'Too many links',
+  ENOLCK: 'No locks available',
+  EOVERFLOW: 'Value too large for defined data type',
+  EDQUOT: 'Disk quota exceeded',
 };
 
 function isKnown(code: string): code is HostErrorCode {

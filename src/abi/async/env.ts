@@ -3,7 +3,7 @@ import { type AsyncError, errorCode, FAULT } from '../../kernel/errors.ts';
 import { asHandle, type Handle } from '../../kernel/handles.ts';
 import { err, ok, type Result } from '../../ports/result.ts';
 import type { RunContext } from '../context.ts';
-import { LINUX_ERRNO } from '../errno.ts';
+import { errnoOf as errnoOfCode } from '../errno.ts';
 import { GuestFault, type GuestMemory } from '../memory.ts';
 
 /** What `moonbitlang/async` handlers work with during one run. */
@@ -29,7 +29,7 @@ export class AsyncFailure extends Error {
 
 /** The Linux errno a failure is recorded as. */
 export function errnoOf(error: AsyncError): number {
-  return LINUX_ERRNO[errorCode(error)];
+  return errnoOfCode(errorCode(error));
 }
 
 /** Rust `{:?}` of `AsyncHostError`. */
@@ -46,7 +46,7 @@ export function debugOf(error: AsyncError): string {
     case 'permission-denied':
       return 'PermissionDenied';
     case 'native':
-      return `Native(${LINUX_ERRNO[error.code]})`;
+      return `Native(${errnoOfCode(error.code)})`;
   }
 }
 

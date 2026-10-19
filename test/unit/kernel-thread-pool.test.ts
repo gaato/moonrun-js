@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { nodeFiles } from '../../src/hosts/node/files.ts';
 import { AsyncKernel } from '../../src/kernel/async-kernel.ts';
 import type { Handle } from '../../src/kernel/handles.ts';
 import { ok, type Result } from '../../src/ports/result.ts';
@@ -14,7 +15,12 @@ function value<T, E>(r: Result<T, E>): T {
 function setup(stdin?: Uint8Array) {
   const scheduler = new FakeScheduler();
   const stdio = memoryStdio(stdin);
-  const kernel = new AsyncKernel({ stdio, scheduler, stdioKind: () => ok('pipe') });
+  const kernel = new AsyncKernel({
+    stdio,
+    scheduler,
+    stdioKind: () => ok('pipe'),
+    files: nodeFiles(),
+  });
   const bus = kernel.pollCreate();
   const source = value(kernel.initThreadPool(bus));
   return { scheduler, stdio, kernel, bus, source };
@@ -27,6 +33,7 @@ describe('thread pool', () => {
       stdio: memoryStdio(),
       scheduler,
       stdioKind: () => ok('pipe'),
+      files: nodeFiles(),
     });
     const job = kernel.pool.insertJob({ kind: 'sleep', ms: 1 });
     expect(kernel.spawnWorker(0, job)).toEqual({ ok: false, error: { kind: 'badf' } });

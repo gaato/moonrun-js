@@ -15,59 +15,6 @@ function notYet<const S extends ImplementedSymbol>(
   return handlers as unknown as { readonly [K in S]: AsyncHandler<K> };
 }
 
-/** Filesystem Jobs, readdir buffers and file locks (Host Filesystem). */
-export const filesystemJobs = notYet([
-  'thread_pool/make_open_job',
-  'thread_pool/make_open_stat_job',
-  'thread_pool/open_job_get_fd',
-  'thread_pool/open_job_get_kind',
-  'thread_pool/open_job_get_dev_id',
-  'thread_pool/open_job_get_file_id',
-  'thread_pool/make_fstatx_job',
-  'thread_pool/make_statx_job',
-  'thread_pool/get_stat_result',
-  'thread_pool/make_file_kind_by_path_job',
-  'thread_pool/make_file_size_job',
-  'thread_pool/get_file_size_result',
-  'thread_pool/make_file_time_job',
-  'thread_pool/make_file_time_by_path_job',
-  'thread_pool/get_file_time_result',
-  'thread_pool/make_access_job',
-  'thread_pool/make_chmod_job',
-  'thread_pool/make_fsync_job',
-  'thread_pool/make_flock_job',
-  'thread_pool/make_remove_job',
-  'thread_pool/make_rename_job',
-  'thread_pool/make_symlink_job',
-  'thread_pool/make_mkdir_job',
-  'thread_pool/make_rmdir_job',
-  'thread_pool/make_readdir_job',
-  'thread_pool/make_realpath_job',
-  'thread_pool/get_realpath_result',
-  'fs/dir_entry_length',
-  'fs/dir_entry_get_name_len',
-  'fs/dir_entry_get_name_offset',
-  'fs/dir_entry_is_dir',
-  'fs/dir_entry_is_hidden',
-  'fs/dir_entry_get_file_id',
-  'fs/try_lock_file',
-  'fs/unlock_file',
-]);
-
-/** inotify watchers. */
-export const inotify = notYet([
-  'fs/inotify/create',
-  'fs/inotify/event_buffer_size',
-  'fs/inotify/event_get_size',
-  'fs/inotify/event_get_wd',
-  'fs/inotify/event_has_ignore',
-  'fs/inotify/event_has_overflow',
-  'fs/inotify/event_has_relevant_event',
-  'fs/inotify/fetch_event',
-  'fs/inotify/remove_file',
-  'thread_pool/make_inotify_add_watch_job',
-]);
-
 /** Sockets, addresses and name resolution (P3). */
 export const network = notYet([
   'socket/accept/unix',

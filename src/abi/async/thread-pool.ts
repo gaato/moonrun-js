@@ -3,6 +3,7 @@ import type { CancellationOutcome } from '../../kernel/thread-pool.ts';
 import { err, ok } from '../../ports/result.ts';
 import { LINUX_ERRNO } from '../errno.ts';
 import { type AsyncEnv, AsyncFailure, errnoOf, handle, status, unwrap } from './env.ts';
+import { isFilesystem } from './fs.ts';
 import { checkedAdd } from './guest-data.ts';
 import type { HandlerGroup } from './types.ts';
 
@@ -88,7 +89,7 @@ export function threadPool(env: AsyncEnv) {
     'thread_pool/get_read_result': (job, dst, offset, len) => {
       const found = unwrap(pool.job(handle(job)));
       const payload = found.payload;
-      if (payload.kind !== 'stream-read' && payload.kind !== 'stream-write') {
+      if (!isFilesystem(payload)) {
         throw new AsyncFailure(BADF);
       }
       if (found.err !== undefined) {
