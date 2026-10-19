@@ -1,4 +1,5 @@
 import type { FilePort, HostFd } from '../ports/files.ts';
+import type { DnsPort, NetPort } from '../ports/net.ts';
 import { err, type HostErrorCode, ok, type Result } from '../ports/result.ts';
 import type { StdioPort } from '../ports/stdio.ts';
 import { CBuffers } from './c-buffers.ts';
@@ -19,6 +20,7 @@ import { lockOwner } from './fs-jobs.ts';
 import { type Handle, Handles, HostKeys } from './handles.ts';
 import { Inotify } from './inotify.ts';
 import type { FilesystemPayload, JobPayload } from './job.ts';
+import { KernelNetwork, type NetworkRequest } from './network.ts';
 import { makePipe } from './pipe.ts';
 import { Poller } from './poller.ts';
 import { EPOLLIN, EPOLLOUT, EPOLLRDHUP } from './readiness.ts';
@@ -41,6 +43,17 @@ export interface AsyncKernelOptions {
    * `--policy`); allows everything when absent.
    */
   readonly authorizeFilesystem?: (payload: FilesystemPayload) => AsyncError | undefined;
+  /** Sockets. */
+  readonly net: NetPort;
+  /** Name resolution for getaddrinfo Jobs. */
+  readonly dns: DnsPort;
+  /**
+   * Host Network authorization (the seam for `--policy`, moonrun `HostNetwork::check_*`);
+   * allows everything when absent.
+   */
+  readonly authorizeNetwork?: (request: NetworkRequest) => AsyncError | undefined;
+  /** Addresses of a getaddrinfo result the guest fetched (for the policy's resolved rules). */
+  readonly recordResolved?: (host: string, addresses: readonly Uint8Array[]) => void;
 }
 
 /** The thread pool's binding to one poll instance (moonrun `ThreadPoolRegistration`). */
@@ -72,6 +85,7 @@ export class AsyncKernel {
   readonly resources: ResourceTable;
   readonly cBuffers: CBuffers;
   readonly pool: ThreadPool;
+  readonly network: KernelNetwork;
   readonly signals = new RunSignals();
   /** `flock` locks of this Run. */
   readonly locks = new FileLocks();
@@ -95,11 +109,17 @@ export class AsyncKernel {
       scheduler: options.scheduler,
       stdio: options.stdio,
       files: options.files,
+      dns: options.dns,
       locks: this.locks,
       cBuffers: this.cBuffers,
       adoptFile: (fd, path) => this.#adoptFile(fd, path),
       lockKeyOf: (owner) => this.#lockKeyOf(owner),
       authorize,
+    });
+    this.network = new KernelNetwork(this.keys, this.resources, this.pool, this.cBuffers, {
+      net: options.net,
+      ...(options.authorizeNetwork === undefined ? {} : { authorize: options.authorizeNetwork }),
+      ...(options.recordResolved === undefined ? {} : { recordResolved: options.recordResolved }),
     });
   }
 
@@ -327,6 +347,8 @@ export class AsyncKernel {
       case 'inotify':
         // An anonymous inode: `st_mode` has no file type.
         return ok('unknown');
+      case 'socket':
+        return ok('socket');
       case 'invalid':
         return err(BADF);
     }
@@ -367,6 +389,8 @@ export class AsyncKernel {
       }
       case 'inotify':
         return err(INVAL);
+      case 'socket':
+        return value.socket.read(dst);
       case 'invalid':
         return err(BADF);
     }
@@ -405,6 +429,8 @@ export class AsyncKernel {
       }
       case 'inotify':
         return err(INVAL);
+      case 'socket':
+        return value.socket.write(src);
       case 'invalid':
         return err(BADF);
     }
@@ -566,6 +592,7 @@ export class AsyncKernel {
       }
     };
     add('c_buffers', this.cBuffers.size);
+    add('addr_infos', this.network.addrInfoCount);
     add('jobs', this.pool.jobCount);
     add('polls', this.#polls.size);
     if (this.#registration !== undefined) {

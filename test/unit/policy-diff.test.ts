@@ -194,6 +194,23 @@ const TOML_CASES = [
   '',
 ];
 
+/** `.mbtx` front matter is YAML (serde_yaml): anchors, tags, block scalars, error positions. */
+const MBTX_CASES = [
+  '// policy:\n//   fs: { read: ["allowed"] }\nfn main {}\n',
+  '// policy:\n//   env: [\nfn main {}\n',
+  'fn main {}\n',
+  '// policy:\n//   fs:\n//     read: [allowed]\n//     write: ["*"]\n//   net:\n//     connect: ["example.com:443"]\nfn main {}\n',
+  '// policy:\n//   fs: &a { read: ["allowed"] }\n//   process: { spawn: !!bool "true" }\n',
+  '// policy:\n//   process:\n//     allow:\n//       - program: git\n//         args_prefix: [status]\n//       - { program: "" }\n',
+  '// policy:\n//   net: { dns: [1, 2] }\n',
+  '// policy:\n//   fs: { read: "x" }\n',
+  '// policy:\n//   fs: |\n//     multi\n',
+  '// policy:\n//   unknown: 1\n',
+  '\ufeff// policy:\n//   env: { set: { A: "1" } }\n',
+  '// policy:\n//   env: { set: { A: 1 } }\n',
+  '// policy: {fs: {read: [nope]}}\n',
+];
+
 describe.skipIf(reference === undefined)('policy loading matches the reference moonrun', () => {
   const run = (name: string, content: string): void => {
     writeFileSync(path.join(dir, name), content);
@@ -219,5 +236,8 @@ describe.skipIf(reference === undefined)('policy loading matches the reference m
   });
   it.each(TOML_CASES.map((c, i) => [i, c] as const))('toml case %i', (i, content) => {
     run(`case-${i}.toml`, content);
+  });
+  it.each(MBTX_CASES.map((c, i) => [i, c] as const))('mbtx case %i', (i, content) => {
+    run(`case-${i}.mbtx`, content);
   });
 });

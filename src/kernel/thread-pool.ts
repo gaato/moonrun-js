@@ -364,6 +364,7 @@ function releasePayload(payload: JobPayload, cBuffers: CBuffers): void {
     case 'fsync':
     case 'flock':
     case 'inotify-add-watch':
+    case 'bind':
       relinquish(payload.resource);
       return;
     case 'readdir':
@@ -388,6 +389,7 @@ function releasePayload(payload: JobPayload, cBuffers: CBuffers): void {
     case 'mkdir':
     case 'rmdir':
     case 'realpath':
+    case 'getaddrinfo':
       return;
   }
 }

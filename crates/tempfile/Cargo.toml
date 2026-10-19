@@ -1,0 +1,10 @@
+[package]
+name = "tempfile"
+version = "3.999.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Stand-in for tempfile::tempfile(): an anonymous in-memory file"
+
+[dependencies]
+os = { path = "../os" }

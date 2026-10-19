@@ -1,0 +1,25 @@
+[package]
+name = "moonrun-policy"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "moonrun's sandbox policy, run environment provisioning and Host Filesystem for moonrun-js"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+# Upstream filesystem/mod.rs gates its V8 adapter on this; never enabled here.
+v8 = []
+
+[dependencies]
+os = { path = "../os" }
+libc = { path = "../libc" }
+tempfile = { path = "../tempfile" }
+moonutil = { path = "../moonutil", features = ["front_matter", "policy_transport"] }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }

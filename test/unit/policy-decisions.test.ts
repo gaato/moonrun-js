@@ -1,573 +1,298 @@
-import { describe, expect, it } from 'vitest';
-import { rootsFromConfig } from '../../src/domains/policy/fs.ts';
-import {
-  authorizeSpawn,
-  ChildAuthority,
-  detectPolicyFormat,
-  FsAuthority,
-  type FsPolicy,
-  formatIp,
-  intentsForOpen,
-  isMoonxExecutable,
-  loadInheritedPolicy,
-  loadPolicyFile,
-  NetAuthority,
-  type NetPolicy,
-  type Policy,
-  parseIp,
-  provisionEnv,
-  type SocketAddr,
-} from '../../src/domains/policy/index.ts';
-import { buildNetPolicy, dnsMatches, parseSocketRule } from '../../src/domains/policy/net.ts';
-import type { CanonicalPort } from '../../src/domains/policy/paths.ts';
-import {
-  canonicalizeEntryPath,
-  canonicalizeExistingPrefix,
-  normalizePath,
-  startsWithPath,
-} from '../../src/domains/policy/paths.ts';
-import { buildProcessPolicy } from '../../src/domains/policy/process.ts';
-import { rustDebugStr } from '../../src/domains/policy/rust-fmt.ts';
-import { extractMbtxFrontMatter } from '../../src/domains/policy/yaml.ts';
-import { err, hostError, ok } from '../../src/ports/result.ts';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { osCapabilities } from '../../src/abi/os-capabilities.ts';
+import { ChildAuthority, isMoonxExecutable } from '../../src/domains/policy/child-authority.ts';
+import { PolicyComponent } from '../../src/domains/policy/component.ts';
+import { POLICY_URL } from '../../src/domains/policy/policy-url.ts';
+import { nodeComponentModule } from '../../src/hosts/node/components.ts';
+import { nodeHost } from '../../src/hosts/node/index.ts';
+import type { HostFile } from '../../src/kernel/file.ts';
+import type { FilesystemPayload } from '../../src/kernel/job.ts';
+import type { Resource } from '../../src/kernel/resource.ts';
 
-/** An in-memory tree: directories and files by absolute path, plus symlinks. */
-function fakeFs(entries: string[], links: Record<string, string> = {}): CanonicalPort {
-  const exists = new Set<string>(['/']);
-  for (const e of entries) {
-    const parts = e.split('/').filter(Boolean);
-    for (let i = 1; i <= parts.length; i++) {
-      exists.add(`/${parts.slice(0, i).join('/')}`);
-    }
+// The decisions of moonrun's policy/** and filesystem/mod.rs (the moonrun-policy
+// component) as the kernel and the legacy imports consult them. Exact load-error texts
+// are checked against the reference moonrun in policy-diff.test.ts.
+
+const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'policy-decisions-')));
+mkdirSync(path.join(root, 'read'));
+mkdirSync(path.join(root, 'write'));
+mkdirSync(path.join(root, 'other'));
+writeFileSync(path.join(root, 'read/a.txt'), 'a');
+symlinkSync(path.join(root, 'other'), path.join(root, 'read/escape'));
+symlinkSync(path.join(root, 'read'), path.join(root, 'other/into-read'));
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+interface Loaded {
+  readonly policy: PolicyComponent;
+  readonly stderr: () => string;
+}
+
+function load(text: string, file = 'policy.toml', env: NodeJS.ProcessEnv = {}): Loaded {
+  writeFileSync(path.join(root, file), text);
+  const module = nodeComponentModule(POLICY_URL);
+  if (!module.ok) {
+    throw new Error('component');
   }
-  const real = (p: string, depth = 0): string | undefined => {
-    if (depth > 8) {
-      return undefined;
-    }
-    let cur = '';
-    for (const part of p.split('/').filter(Boolean)) {
-      cur = `${cur}/${part}`;
-      const target = links[cur];
-      if (target !== undefined) {
-        const resolved = real(target, depth + 1);
-        if (resolved === undefined) {
-          return undefined;
-        }
-        cur = resolved;
-      } else if (!exists.has(cur)) {
-        return undefined;
-      }
-    }
-    return cur === '' ? '/' : cur;
+  let stderr = '';
+  const ambient = nodeHost({ cwd: root });
+  const host = {
+    ...ambient,
+    env: {
+      get: (k: string) => env[k],
+      entries: () =>
+        Object.entries(env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v] as const])),
+      set: () => {},
+      unset: () => {},
+    },
   };
+  const policy = new PolicyComponent(
+    module.value,
+    osCapabilities(host, (b) => {
+      stderr += Buffer.from(b).toString();
+    }),
+  );
+  const r = policy.loadFile(path.join(root, file));
+  if (!r.ok) {
+    throw new Error(r.error.chain.join('\n'));
+  }
   return {
-    realpath: (p) => {
-      const r = p.startsWith('/') ? real(p) : undefined;
-      return r === undefined ? err(hostError('ENOENT')) : ok(r);
+    policy,
+    stderr: () => {
+      const out = stderr;
+      stderr = '';
+      return out;
     },
   };
 }
 
-const fsOf = (read: string[], write: string[]): FsPolicy => ({
-  read: rootsFromConfig(read),
-  write: rootsFromConfig(write),
+const at = (p: string): string => path.join(root, p);
+const fileResource = (canonicalPath: string | undefined): Resource => ({
+  kind: 'file',
+  file: { canonicalPath } as HostFile,
 });
-
-function authority(policy: FsPolicy | undefined, canonical: CanonicalPort): FsAuthority {
-  return new FsAuthority({
-    policy,
-    canonical,
-    resolve: (p) => (p.startsWith('/') ? p : `/work/${p}`),
-  });
-}
-
-const denied = (action: string, target?: string) => ({
-  ok: false,
-  error: {
-    code: 'EACCES',
-    report:
-      target === undefined
-        ? `Sandbox policy blocked ${action}`
-        : `Sandbox policy blocked ${action}: ${target}`,
-  },
-});
+const open = (p: string, access: number, create = 0): FilesystemPayload =>
+  ({
+    kind: 'open',
+    path: p,
+    access,
+    create,
+    append: false,
+    sync: 0,
+    mode: 0o666,
+    request: { mask: 0x0d },
+    result: undefined,
+  }) as unknown as FilesystemPayload;
 
 describe('filesystem decisions', () => {
-  const tree = fakeFs(['/work/allowed/x', '/work/denied/secret.txt', '/work/readonly'], {
-    '/work/alias': '/work/allowed',
-    '/work/escape': '/work/denied',
+  const { policy, stderr } = load('[fs]\nread = ["read"]\nwrite = ["write"]\n');
+
+  it('allows reads under read roots, including missing files, and quotes the path as given', () => {
+    expect(policy.checkJob(open(at('read/a.txt'), 0))).toBeUndefined();
+    expect(policy.checkJob(open(at('read/missing'), 0))).toBeUndefined();
+    expect(policy.checkJob(open(at('other/x'), 0))).toEqual({ kind: 'permission-denied' });
+    expect(stderr()).toBe(`Sandbox policy blocked file read: "${at('other/x')}"\n`);
   });
 
-  it('allows a missing file under an allowed root', () => {
-    const a = authority(fsOf([], ['/work/allowed']), tree);
-    expect(a.authorizeOpen('allowed/new.txt', 1, 0, false).ok).toBe(true);
-  });
-
-  it('keeps read and write roots separate', () => {
-    const a = authority(fsOf(['/work/allowed'], []), tree);
-    expect(a.authorizeRead('allowed/new.txt').ok).toBe(true);
-    expect(a.authorizeWrite('allowed/new.txt')).toEqual(denied('file write', '"allowed/new.txt"'));
-    // create mode needs write even for read access
-    expect(a.authorizeOpen('allowed/new.txt', 0, 1, false)).toEqual(
-      denied('file write', '"allowed/new.txt"'),
+  it('keeps read and write roots separate; open intents follow the flags', () => {
+    expect(policy.checkJob(open(at('read/a.txt'), 1))).toEqual({ kind: 'permission-denied' });
+    expect(policy.checkJob(open(at('write/new'), 1, 1))).toBeUndefined();
+    expect(policy.checkJob(open(at('write/new'), 0))).toEqual({ kind: 'permission-denied' });
+    expect(stderr()).toBe(
+      `Sandbox policy blocked file write: "${at('read/a.txt')}"\nSandbox policy blocked file read: "${at('write/new')}"\n`,
     );
-    const w = authority(fsOf([], ['/work/allowed']), tree);
-    expect(w.authorizeRead('allowed/x')).toEqual(denied('file read', '"allowed/x"'));
   });
 
-  it('quotes the path as the guest wrote it', () => {
-    const a = authority(fsOf([], ['/work/allowed']), tree);
-    expect(a.authorizeWrite('denied.bin')).toEqual(denied('file write', '"denied.bin"'));
-    expect(a.authorizeRead('we"ird\n')).toEqual(denied('file read', '"we\\"ird\\n"'));
+  it('follows symlinks for paths; entries (remove, rename) are not followed', () => {
+    expect(policy.checkJob(open(at('read/escape/x'), 0))).toEqual({ kind: 'permission-denied' });
+    expect(policy.checkJob(open(at('other/into-read/a.txt'), 0))).toBeUndefined();
+    expect(policy.checkJob({ kind: 'remove', path: at('write/x') })).toBeUndefined();
+    expect(
+      policy.checkJob({ kind: 'rename', from: at('write/a'), to: at('read/b'), replace: true }),
+    ).toEqual({ kind: 'permission-denied' });
+    stderr();
   });
 
-  it('is component-wise and follows symlinks', () => {
-    const a = authority(fsOf(['/work/allowed'], []), fakeFs(['/work/allowed', '/work/allowedx']));
-    expect(a.authorizeRead('/work/allowedx/f').ok).toBe(false);
-    const b = authority(fsOf(['/work/allowed'], []), tree);
-    expect(b.authorizeRead('alias/x').ok).toBe(true);
-    expect(b.authorizeRead('escape/secret.txt').ok).toBe(false);
-    expect(b.authorizeRead('allowed/../denied/secret.txt').ok).toBe(false);
-  });
-
-  it('remove and rename act on the entry, not on a symlink target', () => {
-    const a = authority(fsOf([], ['/work/allowed']), tree);
-    // `alias` lives in /work (not allowed) even though it points into the allowed root.
-    expect(a.authorizeRemove('alias').ok).toBe(false);
-    expect(a.authorizeRemove('allowed/x').ok).toBe(true);
-    expect(a.authorizeRename('allowed/x', 'denied/y').ok).toBe(false);
-    expect(a.authorizeRename('allowed/x', 'allowed/y').ok).toBe(true);
-  });
-
-  it('wildcard allows everything; empty lists deny; untracked resources are denied', () => {
-    expect(authority(fsOf([], ['*']), tree).authorizeWrite('denied/new').ok).toBe(true);
-    expect(authority(fsOf([], []), tree).authorizeWrite('allowed/new')).toEqual(
-      denied('file write', '"allowed/new"'),
-    );
-    const any = authority(fsOf(['*'], ['*']), tree);
-    expect(any.authorizeResourceMetadata(undefined)).toEqual(
-      denied('file read', '"<untracked resource>"'),
-    );
-    expect(any.authorizeMetadataAt(undefined, 'rel', true)).toEqual(
-      denied('file read', '"<untracked resource>"'),
-    );
+  it('fd-based Jobs use the canonical path recorded at open; no file is EBADF', () => {
+    const payload = (resource: Resource): FilesystemPayload =>
+      ({
+        kind: 'fstatx',
+        resource,
+        request: { mask: 1 },
+        result: undefined,
+      }) as unknown as FilesystemPayload;
+    expect(policy.checkJob(payload(fileResource(at('read/a.txt'))))).toBeUndefined();
+    expect(policy.checkJob(payload(fileResource(undefined)))).toEqual({
+      kind: 'permission-denied',
+    });
+    expect(stderr()).toBe('Sandbox policy blocked file read: "<untracked resource>"\n');
+    expect(policy.checkJob(payload({ kind: 'invalid' }))).toEqual({ kind: 'badf' });
   });
 
   it('locks: shared needs nothing, exclusive needs write', () => {
-    const a = authority(fsOf(['/work/readonly'], []), tree);
-    expect(a.authorizeResourceLock('/work/readonly', false).ok).toBe(true);
-    expect(a.authorizeResourceLock('/work/readonly', true)).toEqual(
-      denied('file write', '"/work/readonly"'),
+    const flock = (exclusive: boolean): FilesystemPayload => ({
+      kind: 'flock',
+      resource: fileResource(at('read/a.txt')),
+      exclusive,
+    });
+    expect(policy.checkJob(flock(false))).toBeUndefined();
+    expect(policy.checkJob(flock(true))).toEqual({ kind: 'permission-denied' });
+    stderr();
+  });
+
+  it('read/write/fsync Jobs are not checked', () => {
+    expect(
+      policy.checkJob({ kind: 'fsync', resource: fileResource(undefined), dataOnly: false }),
+    ).toBeUndefined();
+  });
+
+  it('the Host Filesystem reports denials as `Permission denied: <path>`', () => {
+    expect(policy.readFileToString('other/x')).toEqual({
+      ok: false,
+      error: 'Permission denied: other/x',
+    });
+    expect(policy.readFileToString('read/a.txt')).toEqual({ ok: true, value: 'a' });
+    expect(policy.writeBytesToFile('read/b', undefined)).toEqual({
+      ok: false,
+      error: 'Permission denied: read/b',
+    });
+    expect(policy.writeBytesToFile('write/b', undefined)).toBe('not-bytes');
+    expect(stderr()).toBe(
+      'Sandbox policy blocked file read: "other/x"\nSandbox policy blocked file write: "read/b"\n',
     );
-  });
-
-  it('no policy never consults the filesystem', () => {
-    const port: CanonicalPort = {
-      realpath: () => {
-        throw new Error('must not be called');
-      },
-    };
-    expect(authority(undefined, port).authorizeWrite('anything').ok).toBe(true);
-  });
-
-  it('maps open flags to intents', () => {
-    expect(intentsForOpen(0, 0, false)).toEqual({ read: true, write: false });
-    expect(intentsForOpen(3, 0, false)).toEqual({ read: true, write: false });
-    expect(intentsForOpen(1, 0, false)).toEqual({ read: false, write: true });
-    expect(intentsForOpen(2, 0, false)).toEqual({ read: true, write: true });
-    expect(intentsForOpen(0, 4, false)).toEqual({ read: true, write: true });
-    expect(intentsForOpen(0, 0, true)).toEqual({ read: true, write: true });
-  });
-
-  it('canonicalizes the longest existing prefix and normalizes the rest', () => {
-    const t = fakeFs(['/a/b'], { '/l': '/a' });
-    expect(canonicalizeExistingPrefix(t, '/l/b/new/../x')).toEqual(ok('/a/b/x'));
-    expect(canonicalizeEntryPath(t, '/l')).toEqual(ok('/l'));
-    expect(canonicalizeEntryPath(t, '/')).toEqual(err({ unresolved: true }));
-    expect(canonicalizeExistingPrefix(t, 'relative').ok).toBe(false);
-    expect(normalizePath('/a/./b/../../..')).toBe('/');
-    expect(startsWithPath('/a/bc', '/a/b')).toBe(false);
   });
 });
 
-const netOf = (cfg: { dns?: string[]; connect?: string[]; bind?: string[] }): NetPolicy => {
-  const r = buildNetPolicy({
-    dns: cfg.dns ?? [],
-    connect: cfg.connect ?? [],
-    bind: cfg.bind ?? [],
-  });
-  if (!r.ok) {
-    throw new Error(r.error.join(' / '));
-  }
-  return r.value;
-};
-const addr = (text: string, port: number): SocketAddr => {
-  const ip = parseIp(text);
-  if (ip === undefined) {
-    throw new Error(text);
-  }
-  return { ip, port };
-};
-
 describe('network decisions', () => {
-  it('dns wildcard matches only subdomains', () => {
-    const p = netOf({ dns: ['*.example.com'] }).dns[0];
-    expect(p && dnsMatches(p, 'api.example.com')).toBe(true);
-    expect(p && dnsMatches(p, 'example.com')).toBe(false);
-    expect(p && dnsMatches(p, 'notexample.com')).toBe(false);
+  const { policy, stderr } = load(
+    '[net]\ndns = ["*.example.com"]\nconnect = ["api.test:443", "[::1]:*"]\nbind = ["127.0.0.1:0"]\n',
+  );
+  const v4 = (ip: number[], port: number) => ({
+    family: 4 as const,
+    ip: Uint8Array.from(ip),
+    port,
+    flowInfo: 0,
+    scopeId: 0,
   });
 
-  it('hostname connect rules allow lookup and the addresses it resolved to', () => {
-    const net = new NetAuthority(netOf({ connect: ['api.deepseek.com:443'] }));
-    expect(net.authorizeDns('API.DEEPSEEK.COM.').ok).toBe(true);
-    net.recordResolved('api.deepseek.com', [addr('127.0.0.1', 0).ip]);
-    expect(net.authorizeConnect(addr('127.0.0.1', 443)).ok).toBe(true);
-    expect(net.authorizeConnect(addr('127.0.0.1', 80))).toEqual(
-      denied('network connect', '"127.0.0.1:80"'),
+  it('dns wildcard matches only subdomains; hostname connect rules allow lookup', () => {
+    expect(policy.checkNetwork({ kind: 'dns', host: 'a.example.com' })).toBeUndefined();
+    expect(policy.checkNetwork({ kind: 'dns', host: 'example.com' })).toEqual({
+      kind: 'permission-denied',
+    });
+    expect(policy.checkNetwork({ kind: 'dns', host: 'API.test.' })).toBeUndefined();
+    expect(stderr()).toBe('Sandbox policy blocked DNS lookup: "example.com"\n');
+  });
+
+  it('connects to the resolved addresses of a hostname rule, on its port', () => {
+    const addr = v4([10, 0, 0, 1], 443);
+    expect(policy.checkNetwork({ kind: 'connect', address: addr })).toEqual({
+      kind: 'permission-denied',
+    });
+    const sockaddr = new Uint8Array(16);
+    new DataView(sockaddr.buffer).setUint16(0, 2, true);
+    sockaddr.set([10, 0, 0, 1], 4);
+    policy.recordResolved('api.test', [sockaddr]);
+    expect(policy.checkNetwork({ kind: 'connect', address: addr })).toBeUndefined();
+    expect(policy.checkNetwork({ kind: 'connect', address: v4([10, 0, 0, 1], 80) })).toEqual({
+      kind: 'permission-denied',
+    });
+    expect(stderr()).toBe(
+      'Sandbox policy blocked network connect: "10.0.0.1:443"\nSandbox policy blocked network connect: "10.0.0.1:80"\n',
     );
   });
 
-  it('resolved addresses are only learned for hostname rules and are per authority', () => {
-    const policy = netOf({ connect: ['*:443', '10.0.0.1:80'] });
-    const a = new NetAuthority(policy);
-    a.recordResolved('anything.example', [addr('127.0.0.1', 0).ip]);
-    expect(a.authorizeConnect(addr('127.0.0.1', 443)).ok).toBe(true); // via *:443 itself
-    expect(a.authorizeConnect(addr('127.0.0.1', 80)).ok).toBe(false);
-    const named = netOf({ connect: ['a.example:443'] });
-    const first = new NetAuthority(named);
-    first.recordResolved('a.example', [addr('127.0.0.1', 0).ip]);
-    expect(new NetAuthority(named).authorizeConnect(addr('127.0.0.1', 443)).ok).toBe(false);
-  });
-
-  it('dns rules do not allow connects; bind rules do not allow connects', () => {
-    const net = new NetAuthority(netOf({ dns: ['api.deepseek.com'], bind: ['127.0.0.1:8080'] }));
-    expect(net.authorizeDns('api.deepseek.com').ok).toBe(true);
-    expect(net.authorizeConnect(addr('127.0.0.1', 443)).ok).toBe(false);
-    expect(net.authorizeBind(addr('127.0.0.1', 8080)).ok).toBe(true);
-    expect(net.authorizeConnect(addr('127.0.0.1', 8080)).ok).toBe(false);
-    expect(net.authorizeBind(addr('127.0.0.1', 0))).toEqual(
-      denied('network bind', '"127.0.0.1:0"'),
+  it('formats IPv6 targets the way Rust does; bind rules are separate', () => {
+    const v6 = (last: number, port: number) => {
+      const ip = new Uint8Array(16);
+      ip[15] = last;
+      return { family: 6 as const, ip, port, flowInfo: 0, scopeId: 0 };
+    };
+    expect(policy.checkNetwork({ kind: 'connect', address: v6(1, 9) })).toBeUndefined();
+    expect(policy.checkNetwork({ kind: 'connect', address: v6(2, 9) })).toEqual({
+      kind: 'permission-denied',
+    });
+    expect(policy.checkNetwork({ kind: 'bind', address: v4([127, 0, 0, 1], 0) })).toBeUndefined();
+    expect(policy.checkNetwork({ kind: 'bind', address: v4([127, 0, 0, 1], 80) })).toEqual({
+      kind: 'permission-denied',
+    });
+    expect(stderr()).toBe(
+      'Sandbox policy blocked network connect: "[::2]:9"\nSandbox policy blocked network bind: "127.0.0.1:80"\n',
     );
-  });
-
-  it('subdomain connect rules do not match the parent domain', () => {
-    const net = new NetAuthority(netOf({ connect: ['*.example.com:443'] }));
-    expect(net.authorizeDns('api.example.com').ok).toBe(true);
-    expect(net.authorizeDns('example.com')).toEqual(denied('DNS lookup', '"example.com"'));
-  });
-
-  it('wildcard connect allows any lookup and connect', () => {
-    const net = new NetAuthority(netOf({ connect: ['*:*'] }));
-    expect(net.authorizeDns('api.deepseek.com').ok).toBe(true);
-    expect(net.authorizeConnect(addr('::1', 9)).ok).toBe(true);
-  });
-
-  it('an ip connect rule allows lookup of that literal only', () => {
-    const net = new NetAuthority(netOf({ connect: ['127.0.0.1:80'] }));
-    expect(net.authorizeDns('127.0.0.1').ok).toBe(true);
-    expect(net.authorizeDns('127.0.0.2').ok).toBe(false);
-  });
-
-  it('formats IPv6 targets the way Rust does', () => {
-    const net = new NetAuthority(netOf({}));
-    expect(net.authorizeConnect(addr('::1', 443))).toEqual(
-      denied('network connect', '"[::1]:443"'),
-    );
-    expect(formatIp(parseIp('2001:0db8:0:0:0:0:0:1') ?? addr('::', 0).ip)).toBe('2001:db8::1');
-    expect(formatIp(parseIp('::ffff:1.2.3.4') ?? addr('::', 0).ip)).toBe('::ffff:1.2.3.4');
-    expect(formatIp(parseIp('1:0:2:0:3:0:4:0') ?? addr('::', 0).ip)).toBe('1:0:2:0:3:0:4:0');
-    expect(parseIp('01.2.3.4')).toBeUndefined();
-    expect(parseIp('fe80::1%eth0')).toBeUndefined();
-  });
-
-  it('rule syntax and errors match moonrun', () => {
-    expect(parseSocketRule('[::1]:443').ok).toBe(true);
-    expect(parseSocketRule('::1:443')).toEqual(
-      err(['IPv6 socket policy rules must use [addr]:port syntax']),
-    );
-    expect(parseSocketRule('a:b')).toEqual(
-      err(['invalid socket policy port "b"', 'invalid digit found in string']),
-    );
-    expect(parseSocketRule('a:70000')).toEqual(
-      err(['invalid socket policy port "70000"', 'number too large to fit in target type']),
-    );
-    expect(parseSocketRule('a:')).toEqual(
-      err(['invalid socket policy port ""', 'cannot parse integer from empty string']),
-    );
-    expect(parseSocketRule('a')).toEqual(err(['socket policy rules must include a port']));
-    expect(buildNetPolicy({ dns: [''], connect: [], bind: [] })).toEqual(
-      err(['empty DNS policy pattern']),
-    );
-    expect(buildNetPolicy({ dns: [], connect: [], bind: ['localhost:8080'] })).toEqual(
-      err(['bind policy rules must use an IP address or *']),
-    );
-    expect(buildNetPolicy({ dns: ['*.'], connect: [], bind: [] }).ok).toBe(true);
   });
 });
 
 describe('process decisions', () => {
-  const scoped = (program: string, argsPrefix: string[]) => {
-    const r = buildProcessPolicy({ spawn: false, allow: [{ program, argsPrefix }] });
-    if (!r.ok) {
-      throw new Error('bad');
-    }
-    return r.value;
-  };
-
   it('matches program and complete argument tokens', () => {
-    const p = scoped('git', ['status']);
-    expect(authorizeSpawn(p, 'git', ['git', 'status', '--short']).ok).toBe(true);
-    expect(authorizeSpawn(p, 'git', ['git'])).toEqual(denied('process spawn'));
-    expect(authorizeSpawn(p, 'git', ['git', 'status-long']).ok).toBe(false);
-    expect(authorizeSpawn(p, 'git-other', ['git-other', 'status']).ok).toBe(false);
-    expect(authorizeSpawn(p, 'git', ['not-git', 'status']).ok).toBe(false);
-    expect(authorizeSpawn(p, 'git', []).ok).toBe(false);
-  });
-
-  it('an empty prefix allows any arguments; "" is one empty token', () => {
-    expect(authorizeSpawn(scoped('git', []), 'git', ['git']).ok).toBe(true);
-    const empty = scoped('git', ['']);
-    expect(authorizeSpawn(empty, 'git', ['git', '']).ok).toBe(true);
-    expect(authorizeSpawn(empty, 'git', ['git']).ok).toBe(false);
-  });
-
-  it('validates configuration', () => {
-    expect(
-      buildProcessPolicy({ spawn: true, allow: [{ program: 'git', argsPrefix: [] }] }),
-    ).toEqual(err(['process.spawn and process.allow cannot be used together']));
-    expect(buildProcessPolicy({ spawn: false, allow: [{ program: '', argsPrefix: [] }] })).toEqual(
-      err(['invalid process.allow[0]', 'program must not be empty']),
+    const { policy, stderr } = load(
+      '[[process.allow]]\nprogram = "git"\nargs_prefix = ["status"]\n',
     );
-    expect(
-      buildProcessPolicy({ spawn: false, allow: [{ program: 'a\0', argsPrefix: [] }] }).ok,
-    ).toBe(false);
-    expect(authorizeSpawn(undefined, 'x', ['x']).ok).toBe(true);
-    expect(authorizeSpawn({ kind: 'allow-all' }, 'x', ['x']).ok).toBe(true);
-    expect(authorizeSpawn({ kind: 'scoped', rules: [] }, 'x', ['x']).ok).toBe(false);
+    expect(policy.checkSpawn('git', ['git', 'status', '-s'])).toBeUndefined();
+    expect(policy.checkSpawn('git', ['git', 'statusx'])).toEqual({ kind: 'permission-denied' });
+    expect(policy.checkSpawn('git', ['other', 'status'])).toEqual({ kind: 'permission-denied' });
+    expect(stderr()).toBe('Sandbox policy blocked process spawn\n'.repeat(2));
   });
 
   it('recognizes moonx', () => {
-    expect(isMoonxExecutable('/usr/bin/moonx')).toBe(true);
+    expect(isMoonxExecutable('/opt/bin/moonx')).toBe(true);
     expect(isMoonxExecutable('moonx.exe')).toBe(true);
-    expect(isMoonxExecutable('moonx2')).toBe(false);
+    expect(isMoonxExecutable('moonxx')).toBe(false);
   });
 
   it('tracks child ownership like moonrun', () => {
     const c = new ChildAuthority();
-    expect(c.checkOwned(10)).toEqual({ ok: false, error: { code: 'EACCES', report: undefined } });
+    expect(c.checkOwned(10).ok).toBe(false);
     c.trackSpawned(10);
     expect(c.checkOwned(10).ok).toBe(true);
     c.trackHandle(1n, 10);
-    c.trackHandle(2n, 10);
     expect(c.checkWait(true, 10, 10).ok).toBe(true);
     expect(c.checkWait(true, 10, 11).ok).toBe(false);
     expect(c.checkWait(false, undefined, 10).ok).toBe(true);
     expect(c.checkWait(false, 10, 10).ok).toBe(false);
     c.untrackHandle(1n);
-    expect(c.checkOwned(10).ok).toBe(true);
-    c.untrackHandle(2n);
     expect(c.checkOwned(10).ok).toBe(false);
-    c.trackSpawned(7);
-    c.revokeUnclaimed(7);
-    expect(c.checkOwned(7).ok).toBe(false);
   });
 });
 
-describe('environment provisioning', () => {
-  const host = [
-    ['PATH', '/bin'],
-    ['HOME', '/home/u'],
-  ] as const;
-  const cfg = (c: Partial<Parameters<typeof provisionEnv>[0]>) =>
-    provisionEnv({ fromHost: [], requiredFromHost: [], set: new Map(), ...c }, host);
-
-  it('starts empty and sorts by name', () => {
-    expect(cfg({})).toEqual(ok([]));
-    expect(
-      cfg({
-        set: new Map([
-          ['B', '2'],
-          ['A', '1'],
-        ]),
-      }),
-    ).toEqual(
-      ok([
-        ['A', '1'],
-        ['B', '2'],
-      ]),
+describe('environment provisioning and inheritance', () => {
+  it('starts empty, copies named host variables, sets override, sorted by name', () => {
+    const { policy } = load(
+      '[env]\nfrom_host = ["PATH", "MISSING"]\n[env.set]\nB = "2"\nA = "1"\n',
+      'env.toml',
+      { PATH: '/bin', HOME: '/home/u' },
     );
-  });
-
-  it('copies named and all host variables; set overrides', () => {
-    expect(cfg({ fromHost: ['PATH', 'MISSING'] })).toEqual(ok([['PATH', '/bin']]));
-    expect(cfg({ fromHost: ['*'], set: new Map([['PATH', 'x']]) })).toEqual(
-      ok([
-        ['HOME', '/home/u'],
-        ['PATH', 'x'],
-      ]),
-    );
-  });
-
-  it('reports errors with moonrun wording', () => {
-    expect(cfg({ fromHost: ['A', 'A'] })).toEqual(err(['duplicate environment policy entry "A"']));
-    expect(cfg({ requiredFromHost: ['NOPE'] })).toEqual(
-      err(['required host environment variable "NOPE" is not set']),
-    );
-    expect(cfg({ set: new Map([['A=B', 'x']]) })).toEqual(
-      err(['invalid environment variable name "A=B"']),
-    );
-    expect(cfg({ set: new Map([['A', 'x\0']]) })).toEqual(
-      err(['environment variable "A" contains a NUL in its value']),
-    );
-    expect(cfg({ set: new Map([['=C:', 'x']]) }).ok).toBe(true);
-  });
-});
-
-describe('loading and inheritance', () => {
-  const opts = { canonical: fakeFs(['/work/read', '/work/write']), hostEnv: [] };
-
-  it('resolves relative roots against the policy directory and keeps "*"', () => {
-    const r = loadPolicyFile(
-      '/work/policy.toml',
-      '[fs]\nread = ["read", "*"]\nwrite = ["/work/write"]\n',
-      opts,
-    );
-    if (!r.ok) {
-      throw new Error(r.error.chain.join('\n'));
-    }
-    expect(r.value.policy.fs.read).toEqual([{ kind: 'path', path: '/work/read' }, { kind: 'any' }]);
-    const missing = loadPolicyFile('/work/p.toml', '[fs]\nread = ["nope"]\n', opts);
-    expect(missing).toEqual(
-      err({
-        chain: [
-          'failed to load sandbox policy (experimental); run `moonrun --help` for policy format notes',
-          'failed to resolve sandbox filesystem root /work/nope',
-          'No such file or directory (os error 2)',
-        ],
-      }),
-    );
-    const viaSourceDir = loadPolicyFile(
-      '/tmp/stdin.mbtx',
-      '// policy:\n//   fs:\n//     read:\n//       - read\n',
-      {
-        ...opts,
-        sourceDir: '/work',
-      },
-    );
-    expect(viaSourceDir.ok).toBe(true);
+    expect(policy.env().entries()).toEqual([
+      ['A', '1'],
+      ['B', '2'],
+      ['PATH', '/bin'],
+    ]);
+    policy.env().set('C', '3');
+    expect(policy.env().get('C')).toBe('3');
+    policy.env().unset('A');
+    expect(policy.env().get('A')).toBeUndefined();
   });
 
   it('serializes the inherited payload: canonical roots, env copies everything, no secrets', () => {
-    const r = loadPolicyFile(
-      '/work/policy.toml',
-      '[env.set]\nSECRET = "s3cret"\n[fs]\nread = ["read"]\n[net]\ndns = ["Example.com"]\n[process]\nspawn = true\n',
-      opts,
+    const { policy } = load(
+      '[env.set]\nSECRET = "s3cret"\n[fs]\nread = ["read"]\n',
+      'inherit.toml',
     );
-    if (!r.ok) {
-      throw new Error('load');
-    }
-    const payload = r.value.policy.inheritance;
+    const payload = Buffer.from(policy.inheritance() ?? new Uint8Array()).toString();
     expect(payload).not.toContain('s3cret');
-    expect(JSON.parse(payload)).toEqual({
-      fs: { read: ['/work/read'], write: [] },
-      net: { dns: ['Example.com'], connect: [], bind: [] },
-      env: { from_host: ['*'], required_from_host: [], set: {} },
-      process: { spawn: true, allow: [] },
-    });
-    expect(payload.startsWith('{\n  "fs": {\n    "read": [\n      "/work/read"\n    ],')).toBe(
-      true,
-    );
-    // A child reloads the payload; its roots must still exist.
-    const child = loadInheritedPolicy(payload, { ...opts, hostEnv: [['PATH', '/bin']] });
-    if (!child.ok) {
-      throw new Error(child.error.chain.join('\n'));
-    }
-    expect(child.value.env).toEqual([['PATH', '/bin']]);
-    expect(child.value.policy.process).toEqual({ kind: 'allow-all' });
-    const gone = loadInheritedPolicy(payload, { canonical: fakeFs([]), hostEnv: [] });
-    expect(gone.ok).toBe(false);
+    const json = JSON.parse(payload) as { fs: { read: string[] }; env: { from_host: string[] } };
+    expect(json.fs.read).toEqual([at('read')]);
+    expect(json.env.from_host).toEqual(['*']);
   });
 
-  it('an absent section denies that surface in policy mode', () => {
-    const r = loadPolicyFile('/work/policy.toml', '', opts);
-    if (!r.ok) {
-      throw new Error('load');
-    }
-    const p: Policy = r.value.policy;
-    expect(p.fs).toEqual({ read: [], write: [] });
-    expect(p.net).toEqual({ dns: [], connect: [], bind: [] });
-    expect(p.process).toEqual({ kind: 'scoped', rules: [] });
-    expect(r.value.env).toEqual([]);
-  });
-
-  it('detects the format', () => {
-    expect(detectPolicyFormat('p.JSON', '')).toBe('json');
-    expect(detectPolicyFormat('p', '  \n{}')).toBe('json');
-    expect(detectPolicyFormat('p', '[fs]')).toBe('toml');
-    expect(detectPolicyFormat('x.MBTX', '')).toBe('mbtx');
-  });
-
-  it('reports inherited JSON failures with their own context', () => {
-    expect(loadInheritedPolicy('{', opts)).toEqual(
-      err({
-        chain: [
-          'failed to load inherited sandbox policy (experimental)',
-          'failed to parse inherited JSON Moonrun Policy',
-          'EOF while parsing an object at line 1 column 1',
-        ],
-      }),
+  it('reads .mbtx front matter (full YAML)', () => {
+    const { policy, stderr } = load(
+      '// policy:\n//   fs: &roots\n//     read: [read]\n//   process: { spawn: true }\nfn main {}\n',
+      'script.mbtx',
     );
-  });
-});
-
-describe('.mbtx front matter', () => {
-  it('extracts leading line comments', () => {
-    expect(
-      extractMbtxFrontMatter(
-        '// policy:\n//   env:\n//     set:\n//       MODE: embedded\n\n///|\nfn main {}\n',
-      ),
-    ).toBe('policy:\n  env:\n    set:\n      MODE: embedded\n');
-    expect(extractMbtxFrontMatter('// policy: {}\n///|\nfn main {}\n')).toBe('policy: {}\n');
-    expect(extractMbtxFrontMatter('// policy: {}\n// explanation\nfn main {}\n')).toBe(
-      'policy: {}\n',
-    );
-    expect(extractMbtxFrontMatter('// An ordinary comment.\nfn main {}\n')).toBeUndefined();
-    expect(extractMbtxFrontMatter('﻿// policy: {}\r\nfn main {}\r\n')).toBe('policy: {}\n');
-  });
-
-  it('reads the YAML subset into a policy', () => {
-    const r = loadPolicyFile(
-      'x.mbtx',
-      '// policy:\n//   env:\n//     set:\n//       APP_ENV: embedded\n//   process:\n//     allow:\n//       - program: git\n//         args_prefix: [status, "--short"]\n//       - program: ls\n',
-      { canonical: fakeFs([]), hostEnv: [] },
-    );
-    if (!r.ok) {
-      throw new Error(r.error.chain.join('\n'));
-    }
-    expect(r.value.env).toEqual([['APP_ENV', 'embedded']]);
-    expect(r.value.policy.process).toEqual({
-      kind: 'scoped',
-      rules: [
-        { program: 'git', argsPrefix: ['status', '--short'] },
-        { program: 'ls', argsPrefix: [] },
-      ],
-    });
-    const none = loadPolicyFile('x.mbtx', 'fn main {}\n', { canonical: fakeFs([]), hostEnv: [] });
-    expect(none).toEqual(
-      err({
-        chain: [
-          'failed to load sandbox policy (experimental); run `moonrun --help` for policy format notes',
-          '.mbtx policy source x.mbtx has no `// policy:` front matter',
-        ],
-      }),
-    );
-  });
-});
-
-describe('rust formatting', () => {
-  it('debug-escapes like Rust', () => {
-    expect(rustDebugStr('a\'b"c\\d\n\t\0\u{7f}é\u{a0}')).toBe(
-      '"a\'b\\"c\\\\d\\n\\t\\0\\u{7f}é\\u{a0}"',
-    );
+    expect(policy.checkJob(open(at('read/a.txt'), 0))).toBeUndefined();
+    expect(policy.checkSpawn('anything', ['anything'])).toBeUndefined();
+    expect(stderr()).toBe('');
   });
 });

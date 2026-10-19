@@ -1,9 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
+import { osCapabilities } from '../../abi/os-capabilities.ts';
+import { PolicyComponent } from '../../domains/policy/component.ts';
+import { POLICY_URL } from '../../domains/policy/policy-url.ts';
 import { compileBytes } from '../../engine/load.ts';
 import { type RunOutcome, run, type TestArgs } from '../../engine/run.ts';
-import { type Parsed, PROGRAM, parseArgs, UsageError } from './args.ts';
+import { colorEnabled, parseArgs } from './cli-args.ts';
+import { nodeComponentModule, nodeDiagnostics } from './components.ts';
 import { nodeHost } from './index.ts';
+import { takeInheritedPolicy } from './policy-loader.ts';
 
 export const VERSION = '0.0.0';
 const COMPAT = 'compat moonrun 0.1.20261012 748b63c';
@@ -37,7 +42,7 @@ function fail(chain: readonly string[]): never {
 
 /**
  * Raw argv bytes after the script, from /proc/self/cmdline: `process.argv` replaces
- * invalid UTF-8 with U+FFFD, but moonrun opens the module path as raw bytes.
+ * invalid UTF-8 with U+FFFD, but clap and moonrun see the raw bytes.
  */
 function rawArgs(count: number): Buffer[] | undefined {
   try {
@@ -76,30 +81,31 @@ function rustAbsolute(raw: Buffer): Uint8Array {
   return Buffer.concat(parts.flatMap((p) => [Buffer.from('/'), p]).concat(trailing));
 }
 
+const decoder = new TextDecoder();
+
 async function main(argv: readonly string[]): Promise<number> {
-  let command: Parsed;
-  try {
-    command = parseArgs(argv);
-  } catch (e) {
-    if (e instanceof UsageError) {
-      process.stderr.write(e.message);
-      return 2;
-    }
-    throw e;
+  // moonrun takes the inherited policy before clap parses (main.rs:96-98); its errors are bare.
+  const inherited = takeInheritedPolicy(process.env);
+  if (!inherited.ok) {
+    fail(inherited.error.chain);
   }
-  if (command.kind === 'version') {
-    process.stdout.write(`${PROGRAM} ${VERSION} (${COMPAT})\n`);
-    return 0;
+  const command = parseArgs(rawArgs(argv.length) ?? argv.map((a) => Buffer.from(a)), {
+    version: `${VERSION} (${COMPAT})`,
+    color: {
+      stdout: colorEnabled(process.stdout.isTTY === true, process.env),
+      stderr: colorEnabled(process.stderr.isTTY === true, process.env),
+    },
+  });
+  if (command.kind === 'exit') {
+    (command.code === 0 ? process.stdout : process.stderr).write(command.message);
+    return command.code;
   }
-  if (command.kind === 'help') {
-    process.stdout.write(`Usage: ${PROGRAM} [OPTIONS] <PATH> [ARGS]...\n`);
-    return 0;
-  }
-  const rawPath = rawArgs(argv.length)?.[command.pathIndex] ?? Buffer.from(command.path);
+  const rawPath = Buffer.from(command.path);
+  const name = decoder.decode(command.path);
   if (!existsSync(rawPath)) {
     fail(['no such file']);
   }
-  if (path.extname(command.path) !== '.wasm') {
+  if (path.extname(name) !== '.wasm') {
     fail(['Unsupported file type']);
   }
   let testArgs: TestArgs | undefined;
@@ -111,25 +117,35 @@ async function main(argv: readonly string[]): Promise<number> {
     }
   }
   const bytes = new Uint8Array(readFileSync(rawPath));
-  const loaded = compileBytes(bytes, command.path, {
-    readText: (p) => {
-      try {
-        return readFileSync(p, 'utf8');
-      } catch {
-        return undefined;
-      }
-    },
-    resolve: (dir, rel) => path.resolve(dir, rel),
-    dirname: (p) => path.dirname(p),
-  });
+  const loaded = compileBytes(bytes, name, nodeDiagnostics());
   if (!loaded.ok) {
     fail(loaded.error.chain);
   }
   const host = nodeHost({ currentExe: rustAbsolute(rawPath) });
+  // moonrun `Runtime::new`: an inherited policy wins over `--policy`.
+  let policy: PolicyComponent | undefined;
+  if (inherited.value !== undefined || command.policy !== undefined) {
+    const module = nodeComponentModule(POLICY_URL);
+    if (!module.ok) {
+      fail([module.error.message ?? module.error.code]);
+    }
+    policy = new PolicyComponent(
+      module.value,
+      osCapabilities(host, (b) => host.stdio.writeStderr(b)),
+    );
+    const result =
+      inherited.value !== undefined
+        ? policy.loadInherited(inherited.value)
+        : policy.loadFile(command.policy ?? '', command.policySourceDir);
+    if (!result.ok) {
+      fail(result.error.chain);
+    }
+  }
   const outcome: RunOutcome = await run(loaded.value, host, {
     args: command.args,
     testArgs,
     noStackTrace: command.noStackTrace,
+    policy,
   });
   switch (outcome.kind) {
     case 'completed':

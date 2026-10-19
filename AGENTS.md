@@ -5,7 +5,8 @@ moonrun (`0.1.20261012`, moon commit `748b63c`) is the yardstick: same wasm, sam
 stdout/stderr/exit.
 
 - Design and phases: `docs/plan.md`. Spike results: `docs/spikes.md`. Known differences: `docs/divergences.md`.
-- Read moonrun sources at the reference commit: `git -C ~/ghq/github.com/moonbitlang/moon show 748b63c:crates/moonrun/src/<file>`.
+- Upstreams are shallow submodules (`upstream/moon`, `upstream/async`; the gitlink is the pin). After cloning run `git submodule update --init --depth 1` (not recursive). Read sources at the pin: `git -C upstream/moon show HEAD:crates/moonrun/src/<file>`; scripts use `scripts/upstream.ts`. Move a pin with `node scripts/bump-upstream.ts <name> <commit>` and commit the gitlink with git (jj ignores gitlinks).
+- Parts of moonrun's own Rust source are compiled to wasm components (`crates/`, `docs/reuse.md`): `node scripts/sync-upstream.ts` extracts them, `node scripts/build-wasm.ts` builds the committed `.wasm` files (both have `--check`).
 - Layers (checked by `node scripts/check-layers.ts`): `engine -> abi -> domains -> kernel -> ports <- hosts`. Only `src/hosts/` may import `node:*`.
 - Imports are declared with `fn`/`suspending` in `src/abi/define.ts`; never write handler argument types by hand.
 - Ports and domains return `Result`; only `src/abi/` turns failures into guest conventions.

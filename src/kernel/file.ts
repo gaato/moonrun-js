@@ -77,6 +77,12 @@ export class HostFile {
    * derives the canonical path from it.
    */
   readonly path: string;
+  /**
+   * `realpath(path)` taken right after the open, best effort (moonrun's open Job keeps
+   * `std::fs::canonicalize(filename).ok()` with the Resource). Host Filesystem
+   * authorization of fd-based Jobs reads it; `undefined` when it failed.
+   */
+  canonicalPath: string | undefined;
   /** Cached `dev:ino` lock identity. */
   lockKey: string | undefined;
   directory: DirectoryCursor | undefined;

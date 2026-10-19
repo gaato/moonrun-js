@@ -1,8 +1,9 @@
-import { createAsyncKernel } from '../abi/async/index.ts';
+import { createAsyncKernel, type PolicySeams } from '../abi/async/index.ts';
 import type { ImportFamily, RunContext } from '../abi/context.ts';
 import { FAMILIES } from '../abi/families.ts';
 import { GuestMemory } from '../abi/memory.ts';
-import { render } from '../diagnostics/render.ts';
+import { osCapabilities } from '../abi/os-capabilities.ts';
+import { PolicyComponent } from '../domains/policy/component.ts';
 import { Stdio, Utf16Writer } from '../domains/stdio.ts';
 import { type Termination, TerminationCell } from '../kernel/termination.ts';
 import type { Host } from '../ports/host.ts';
@@ -23,6 +24,11 @@ export interface RunOptions {
   readonly args: readonly string[];
   readonly testArgs?: TestArgs | undefined;
   readonly noStackTrace?: boolean | undefined;
+  /**
+   * A policy already loaded into a component (`--policy` / `MOONRUN_INHERITED_POLICY`,
+   * moonrun `Runtime::new`). Its environment replaces the host's for the whole run.
+   */
+  readonly policy?: PolicyComponent | undefined;
   /** Replaces or extends the built-in import families (mainly for tests). */
   readonly families?: Readonly<Record<string, ImportFamily>> | undefined;
 }
@@ -65,16 +71,53 @@ function terminationOutcome(termination: Termination): RunOutcome {
 }
 
 /** Runs a loaded module once with a fresh set of host state. */
+/** Instantiates the policy component for a run without a policy. */
+export function ambientPolicy(host: Host): PolicyComponent {
+  const module = host.components.policy();
+  if (!module.ok) {
+    throw new Error(
+      `cannot load moonrun-policy.wasm: ${module.error.message ?? module.error.code}`,
+    );
+  }
+  const component = new PolicyComponent(
+    module.value,
+    osCapabilities(host, (bytes) => host.stdio.writeStderr(bytes)),
+  );
+  component.initAmbient();
+  return component;
+}
+
+/** The Async Host checks of an enforced policy. */
+function policySeams(policy: PolicyComponent | undefined): PolicySeams {
+  if (policy === undefined || !policy.enforced) {
+    return {};
+  }
+  return {
+    authorizeFilesystem: (payload) => policy.checkJob(payload),
+    ...(policy.checksNetwork
+      ? {
+          authorizeNetwork: (request) => policy.checkNetwork(request),
+          recordResolved: (host, addresses) => policy.recordResolved(host, addresses),
+        }
+      : {}),
+  };
+}
+
 export async function run(
   loaded: LoadedModule,
-  host: Host,
+  ambientHost: Host,
   options: RunOptions,
 ): Promise<RunOutcome> {
+  const loadedPolicy = options.policy;
+  // Environment provisioning: under a policy the run sees only the provisioned variables.
+  const host: Host =
+    loadedPolicy?.enforced === true ? { ...ambientHost, env: loadedPolicy.env() } : ambientHost;
+  let policy = loadedPolicy;
   const stdio = new Stdio(host.stdio);
   const termination = new TerminationCell();
   const cleanups: (() => void)[] = [];
   const completionChecks: (() => string | undefined)[] = [];
-  const asyncKernel = createAsyncKernel(host);
+  const asyncKernel = createAsyncKernel(host, policySeams(loadedPolicy));
   cleanups.push(() => asyncKernel.teardown());
   const ctx: RunContext = {
     host,
@@ -83,6 +126,11 @@ export async function run(
     memory: new GuestMemory(),
     termination,
     asyncKernel,
+    diagnostics: loaded.diagnostics,
+    policy: () => {
+      policy ??= ambientPolicy(host);
+      return policy;
+    },
     moduleName: loaded.name,
     args: options.args,
     onCompleted: (check) => {
@@ -96,7 +144,7 @@ export async function run(
 
   const classify = (error: unknown): CallOutcome => {
     const lines = exceptionLines(error);
-    const formatted = render(lines, loaded.sourceMap, noStackTrace);
+    const formatted = loaded.diagnostics.render(lines, loaded.sourceMap, noStackTrace);
     if (error instanceof WebAssembly.RuntimeError || error instanceof WebAssembly.Exception) {
       return { kind: 'guest-failure', diagnostic: formatted };
     }

@@ -14,7 +14,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { nodeHost } from '../../src/hosts/node/index.ts';
+import { nodeDiagnostics, nodeHost } from '../../src/hosts/node/index.ts';
 import { compileBytes, type RunOutcome, run } from '../../src/index.ts';
 import type { EnvPort } from '../../src/ports/env.ts';
 import type { StdioPort } from '../../src/ports/stdio.ts';
@@ -158,7 +158,7 @@ async function runInProcess(name: string, c: Case = {}): Promise<Captured & { tr
   const wasm = assemble(name);
   const base = path.join(scratch, `${name}-engine`);
   const root = layout(base, wasm);
-  const loaded = compileBytes(wasm, '../prog.wasm');
+  const loaded = compileBytes(wasm, '../prog.wasm', nodeDiagnostics());
   if (!loaded.ok) {
     throw new Error(loaded.error.chain.join(': '));
   }

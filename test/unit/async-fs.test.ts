@@ -22,6 +22,7 @@ import {
 import type { Handle } from '../../src/kernel/handles.ts';
 import { Inotify } from '../../src/kernel/inotify.ts';
 import type { FilesystemPayload } from '../../src/kernel/job.ts';
+import { unsupportedDns, unsupportedNet } from '../../src/kernel/net-unsupported.ts';
 import { acquire } from '../../src/kernel/resource.ts';
 import { ok } from '../../src/ports/result.ts';
 import { FakeScheduler, memoryStdio } from './kernel-fakes.ts';
@@ -195,6 +196,8 @@ describe('filesystem Jobs', () => {
       scheduler: new FakeScheduler(),
       stdioKind: () => ok('pipe'),
       files: nodeFiles(),
+      net: unsupportedNet,
+      dns: unsupportedDns,
     });
     const run = async (payload: FilesystemPayload): Promise<Handle> => {
       const job = kernel.pool.insertJob(payload);

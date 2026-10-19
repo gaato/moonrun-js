@@ -1,0 +1,143 @@
+{
+  "$comment": "Upstream moon files compiled into the wasm components (docs/reuse.md). scripts/sync-upstream.ts extracts each `path` at the moon pin (scripts/upstream.ts) into crates/<crate>/upstream/<path>, applies `rewrites` (the only allowed edits) and checks the per-file hit counts, copies `stubs`, scans for OS calls the rewrites cannot reach, and aligns crates/Cargo.lock with moon's Cargo.lock. Counts cover the whole file, test modules included.",
+  "rewrites": {
+    "std-os": {
+      "from": "\\bstd::os::(unix|fd)::",
+      "to": "crate::os::$1::"
+    },
+    "path-method": {
+      "from": "\\bPath::new\\(([a-z_]+)\\)\\.(is_file|is_dir|exists)\\(\\)",
+      "to": "crate::os::path::$2(Path::new($1))"
+    },
+    "std-fs": {
+      "from": "\\bstd::fs::(read_to_string|canonicalize|read|metadata|symlink_metadata|read_link|read_dir|File|Metadata|write|create_dir_all|create_dir|remove_dir_all|remove_dir|remove_file|rename|OpenOptions)\\b",
+      "to": "crate::os::fs::$1"
+    },
+    "std-env": {
+      "from": "\\bstd::env::(vars_os|var_os|var|vars|current_dir)\\b",
+      "to": "crate::os::env::$1"
+    }
+  },
+  "files": [
+    {
+      "crate": "moonutil",
+      "path": "crates/moonutil/src/demangle.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonutil",
+      "path": "crates/moonutil/src/front_matter.rs",
+      "rewrites": {
+        "std-fs": 4
+      }
+    },
+    {
+      "crate": "moonrun-diag",
+      "path": "crates/moonrun/src/source_map.rs",
+      "rewrites": {
+        "std-fs": 1
+      }
+    },
+    {
+      "crate": "moonrun-diag",
+      "path": "crates/moonrun/src/wasm_diagnostic.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonrun-diag",
+      "path": "crates/moonrun/src/memory_sanitizer.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/policy/mod.rs",
+      "rewrites": {
+        "std-os": 2,
+        "std-fs": 20
+      }
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/policy/config.rs",
+      "rewrites": {
+        "std-fs": 7
+      }
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/policy/fs.rs",
+      "rewrites": {
+        "std-fs": 8
+      }
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/policy/net.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/policy/process.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/policy/policy_inheritance.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/runtime/environment.rs",
+      "rewrites": {
+        "std-os": 1,
+        "std-env": 4
+      }
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/runtime/environment_provisioning.rs",
+      "rewrites": {
+        "std-env": 2
+      }
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/runtime/working_directory.rs",
+      "rewrites": {
+        "std-env": 3
+      }
+    },
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/filesystem/mod.rs",
+      "rewrites": {
+        "std-os": 6,
+        "path-method": 3,
+        "std-fs": 38
+      }
+    },
+    {
+      "crate": "moonrun-cli",
+      "path": "crates/moonrun/src/main.rs",
+      "rewrites": {},
+      "compiledItem": "struct Commandline",
+      "$comment": "Only the clap definition is compiled (crates/moonrun-cli/build.rs cuts it out), so the file is not scanned."
+    },
+    {
+      "crate": "stat-layout",
+      "path": "crates/moonrun/src/filesystem/job/stat.rs",
+      "rewrites": {
+        "std-os": 6,
+        "std-fs": 3
+      }
+    }
+  ],
+  "stubs": [
+    {
+      "crate": "moonrun-policy",
+      "path": "crates/moonrun/src/filesystem/job/mod.rs",
+      "$comment": "filesystem/mod.rs declares `mod job;`; the real module runs the fs syscalls. The stub is the policy bridge for the async Filesystem Jobs."
+    }
+  ],
+  "lockExceptions": {}
+}

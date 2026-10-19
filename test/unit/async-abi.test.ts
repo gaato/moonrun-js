@@ -12,6 +12,7 @@ import { ASYNC_IMPORTS } from '../../src/generated/async-imports.ts';
 import { nodeFiles } from '../../src/hosts/node/files.ts';
 import { AsyncKernel } from '../../src/kernel/async-kernel.ts';
 import { NULL_HANDLE } from '../../src/kernel/handles.ts';
+import { unsupportedDns, unsupportedNet } from '../../src/kernel/net-unsupported.ts';
 import { EPOLLERR, EPOLLHUP, EPOLLIN, EPOLLOUT, EPOLLRDHUP } from '../../src/kernel/readiness.ts';
 import { TerminationCell } from '../../src/kernel/termination.ts';
 import { ok } from '../../src/ports/result.ts';
@@ -23,6 +24,8 @@ function setup() {
     scheduler: new FakeScheduler(),
     stdioKind: () => ok('char-device'),
     files: nodeFiles(),
+    net: unsupportedNet,
+    dns: unsupportedDns,
   });
   const memory = new GuestMemory();
   memory.bind(new WebAssembly.Memory({ initial: 1 }));
@@ -64,7 +67,7 @@ describe('moonbitlang/async handler map', () => {
     expect([...seen].sort()).toEqual(implemented.sort());
   });
 
-  it('declares the table signature and suspends only in event_bus/wait', () => {
+  it('declares the table signature and suspends only where the host may wait', () => {
     const { imports } = setup();
     expect(Object.keys(imports).length).toBe(Object.keys(ASYNC_IMPORTS).length);
     const wait = imports['event_bus/wait'] as FunctionImport;
@@ -73,7 +76,14 @@ describe('moonbitlang/async handler map', () => {
     const suspending = Object.entries(imports)
       .filter(([, def]) => def.kind === 'function' && def.suspends)
       .map(([symbol]) => symbol);
-    expect(suspending).toEqual(['event_bus/wait']);
+    // Node binds and connects UDP sockets asynchronously, so these may suspend too.
+    expect(suspending.sort()).toEqual([
+      'event_bus/wait',
+      'socket/bind',
+      'socket/listen',
+      'socket/sendto/unix',
+      'socket/udp_client_connect',
+    ]);
   });
 
   it('reports host errors with the AsyncHostError Debug name', () => {
@@ -86,8 +96,8 @@ describe('moonbitlang/async handler map', () => {
       'fd_util/get_atime_sec failed: Fault',
     );
     expect(() => call('event_bus/event_fd', 0n)).toThrow('event_bus/event_fd failed: Badf');
-    expect(() => call('socket/listen', 0n)).toThrow(
-      'moonbitlang/async.socket/listen is not implemented yet',
+    expect(() => call('process/kill', 1)).toThrow(
+      'moonbitlang/async.process/kill is not implemented yet',
     );
     expect(() => call('event_bus/event_pid', 0n)).toThrow(
       'platform-inactive moonbitlang/async import `event_bus/event_pid` was called',

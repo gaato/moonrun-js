@@ -115,7 +115,15 @@ export type JobPayload =
       readonly data: Uint8Array;
       readonly position: bigint;
     }
-  | FilesystemPayload;
+  | FilesystemPayload
+  | NetworkPayload;
+
+/** Network Jobs (moonrun `network::Job`). */
+export type NetworkPayload =
+  /** `make_bind_job`: the guest's address bytes, decoded when the Job runs. */
+  | { readonly kind: 'bind'; readonly resource: Resource; readonly address: Uint8Array }
+  /** `make_getaddrinfo_job`: the encoded addresses once it ran (empty after an `EAI_*` failure). */
+  | { readonly kind: 'getaddrinfo'; readonly host: string; result: Uint8Array[] | undefined };
 
 /** The common Job result envelope (`ret`, `err`) plus its payload. */
 export class Job {

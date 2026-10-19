@@ -1,0 +1,17 @@
+[package]
+name = "moonrun-diag"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "moonrun's guest diagnostics (source maps, stack rendering, demangling, memory sanitizer) for moonrun-js"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+os = { path = "../os" }
+moonutil = { path = "../moonutil" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

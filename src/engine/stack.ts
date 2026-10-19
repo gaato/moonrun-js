@@ -1,4 +1,4 @@
-import type { DiagnosticLine } from '../diagnostics/render.ts';
+import type { DiagnosticLine } from '../diagnostics/diag.ts';
 
 const HEX = /^[0-9a-fA-F]+$/;
 

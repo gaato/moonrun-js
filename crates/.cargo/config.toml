@@ -1,0 +1,8 @@
+[build]
+target = "wasm32-unknown-unknown"
+
+[target.wasm32-unknown-unknown]
+# moonrun-js always behaves as Linux: the component crates set `--cfg unix` from
+# their build.rs so upstream's `#[cfg(unix)]` branches compile (against the `libc`
+# and `os` stand-ins). rustc denies setting a builtin cfg unless this lint is allowed.
+rustflags = ["-A", "explicit_builtin_cfgs_in_flags"]

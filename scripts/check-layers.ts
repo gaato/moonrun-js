@@ -1,5 +1,5 @@
 // Enforces the one-way layering of src/: engine -> abi -> domains -> kernel -> ports <- hosts.
-// diagnostics, generated and types are leaves usable from anywhere in the core.
+// components, diagnostics, generated and types are leaves usable from anywhere in the core.
 import { readdirSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 
@@ -12,7 +12,7 @@ const RANK: Record<string, number> = {
   engine: 4,
   hosts: 5,
 };
-const LEAVES = new Set(['diagnostics', 'generated', 'types']);
+const LEAVES = new Set(['components', 'diagnostics', 'generated', 'types']);
 
 function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>

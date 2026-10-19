@@ -17,12 +17,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
+import { checkoutUpstream } from './upstream.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const cache = path.join(repoRoot, '.cache');
-const lock = JSON.parse(readFileSync(path.join(repoRoot, 'upstream.lock.json'), 'utf8')) as {
-  async: { commit: string };
-};
 const home = process.env['HOME'] ?? '';
 
 const argv = process.argv.slice(2);
@@ -50,13 +48,14 @@ const jsRunner = path.join(
 
 function checkout(): string {
   const dir = path.join(cache, 'upstream', suite ?? '');
-  if (suite === 'async' || suite === 'x') {
+  if (suite === 'async') {
+    return checkoutUpstream('async', dir);
+  }
+  if (suite === 'x') {
+    // x is not pinned: the local clone's current state.
     const source = path.join(home, 'ghq/github.com/moonbitlang', suite);
     if (!existsSync(dir)) {
       execFileSync('git', ['clone', '--quiet', source, dir]);
-    }
-    if (suite === 'async') {
-      execFileSync('git', ['-C', dir, 'checkout', '--quiet', '--detach', lock.async.commit]);
     }
     return dir;
   }

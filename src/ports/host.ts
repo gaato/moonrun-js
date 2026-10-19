@@ -1,7 +1,9 @@
 import type { ClockPort } from './clock.ts';
+import type { ComponentsPort } from './components.ts';
 import type { EnvPort } from './env.ts';
 import type { FilePort } from './files.ts';
 import type { FsPort } from './fs.ts';
+import type { DnsPort, NetPort } from './net.ts';
 import type { RandomPort } from './random.ts';
 import type { StdioPort } from './stdio.ts';
 
@@ -13,6 +15,9 @@ export interface Host {
   readonly random: RandomPort;
   readonly fs: FsPort;
   readonly files: FilePort;
+  readonly net: NetPort;
+  readonly dns: DnsPort;
+  readonly components: ComponentsPort;
   readonly platform: HostPlatform;
 }
 

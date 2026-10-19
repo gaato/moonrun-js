@@ -1,4 +1,4 @@
-import { AsyncKernel, type FdKind } from '../../kernel/async-kernel.ts';
+import { AsyncKernel, type AsyncKernelOptions, type FdKind } from '../../kernel/async-kernel.ts';
 import { type AsyncError, native } from '../../kernel/errors.ts';
 import { fdKindOfMode } from '../../kernel/file.ts';
 import type { StdioStream } from '../../kernel/resource.ts';
@@ -17,18 +17,27 @@ import { fsHelpers } from './fs-helpers.ts';
 import { io } from './io.ts';
 import { osError } from './os-error.ts';
 import { osString } from './os-string.ts';
-import { network, processes, tls } from './pending.ts';
+import { processes, tls } from './pending.ts';
 import { processEnv } from './process-env.ts';
+import { sockets } from './socket.ts';
 import { threadPool } from './thread-pool.ts';
 import type { AsyncHandlers, ImplementedSymbol } from './types.ts';
 
+/** The `--policy` checks of the Async Host (absent: everything is allowed). */
+export type PolicySeams = Pick<
+  AsyncKernelOptions,
+  'authorizeFilesystem' | 'authorizeNetwork' | 'recordResolved'
+>;
+
 /** The Async Host of a run, over the host's stdio and the global event loop. */
-export function createAsyncKernel(host: Host): AsyncKernel {
+export function createAsyncKernel(host: Host, policy: PolicySeams = {}): AsyncKernel {
   return new AsyncKernel({
+    ...policy,
     stdio: host.stdio,
     scheduler: new GlobalScheduler(),
     files: host.files,
-    // Seam for `--policy`: Host Filesystem authorization of each Filesystem Job.
+    net: host.net,
+    dns: host.dns,
     stdioKind: (stream: StdioStream): Result<FdKind, AsyncError> => {
       const stat = host.files.fstat(stream as HostFd);
       return stat.ok ? ok(fdKindOfMode(stat.value.mode)) : err(native(stat.error.code));
@@ -56,7 +65,7 @@ export function asyncHandlerGroups(env: AsyncEnv) {
     processEnv(env),
     fsHelpers(env),
     filesystem(env),
-    network,
+    sockets(env),
     tls,
     processes,
   ] as const;

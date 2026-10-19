@@ -1,0 +1,14 @@
+[package]
+name = "stat-layout"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Test-only: upstream filesystem/job/stat.rs, to check the TypeScript stat layout against it (not shipped)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+os = { path = "../os" }
+libc = { path = "../libc" }

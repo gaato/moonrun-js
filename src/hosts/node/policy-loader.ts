@@ -1,26 +1,14 @@
+// The OS side of moonrun's policy transport (moonutil `policy_transport`): the inherited
+// descriptor and the anonymous file handed to moonx children. Loading and checking the
+// policy itself is the moonrun-policy component's (domains/policy/component.ts).
 import { randomBytes } from 'node:crypto';
-import {
-  closeSync,
-  fstatSync,
-  openSync,
-  readFileSync,
-  readSync,
-  realpathSync,
-  unlinkSync,
-  writeSync,
-} from 'node:fs';
+import { closeSync, fstatSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import {
-  FILE_CONTEXT,
-  INHERITED_CONTEXT,
-  type LoadedPolicy,
-  loadInheritedPolicy,
-  loadPolicyFile,
-  osErrorText,
-  type PolicyError,
-} from '../../domains/policy/index.ts';
-import type { CanonicalPort } from '../../domains/policy/paths.ts';
+import { rustIoErrorText } from '../../abi/errno.ts';
+import { osCapabilities } from '../../abi/os-capabilities.ts';
+import { PolicyComponent, type PolicyError } from '../../domains/policy/component.ts';
+import { POLICY_URL } from '../../domains/policy/policy-url.ts';
 import {
   err,
   type HostError,
@@ -29,6 +17,8 @@ import {
   ok,
   type Result,
 } from '../../ports/result.ts';
+import { nodeComponentModule } from './components.ts';
+import { nodeHost } from './index.ts';
 
 /** Name of the variable moonrun uses to hand a policy to child runs (`moonutil::constants`). */
 export const MOONRUN_INHERITED_POLICY = 'MOONRUN_INHERITED_POLICY';
@@ -39,21 +29,6 @@ function toHostError(e: unknown): HostError {
   return hostError((typeof code === 'string' ? code : 'EIO') as HostErrorCode, message);
 }
 
-/** `std::fs::canonicalize`. */
-export const nodeCanonical: CanonicalPort = {
-  realpath(p) {
-    try {
-      return ok(realpathSync.native(p));
-    } catch (e) {
-      return err(toHostError(e));
-    }
-  },
-};
-
-function hostEnvEntries(env: NodeJS.ProcessEnv): Array<readonly [string, string]> {
-  return Object.entries(env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v] as const]));
-}
-
 /**
  * `PolicyTransfer::take_from_env` + `read`: if the variable is present it is removed from `env`
  * (before anything else can copy it) and the file descriptor it names is read to the end.
@@ -62,7 +37,7 @@ function hostEnvEntries(env: NodeJS.ProcessEnv): Array<readonly [string, string]
  */
 export function takeInheritedPolicy(
   env: NodeJS.ProcessEnv = process.env,
-): Result<string | undefined, PolicyError> {
+): Result<Uint8Array | undefined, PolicyError> {
   const token = env[MOONRUN_INHERITED_POLICY];
   if (token === undefined) {
     return ok(undefined);
@@ -90,7 +65,7 @@ export function takeInheritedPolicy(
     return err({
       chain: [
         'failed to isolate inherited Moonrun Policy file descriptor',
-        osErrorText(toHostError(e)),
+        rustIoErrorText(toHostError(e)),
       ],
     });
   }
@@ -105,7 +80,9 @@ export function takeInheritedPolicy(
       chunks.push(Buffer.from(buf.subarray(0, n)));
     }
   } catch (e) {
-    return err({ chain: ['failed to read inherited Moonrun Policy', osErrorText(toHostError(e))] });
+    return err({
+      chain: ['failed to read inherited Moonrun Policy', rustIoErrorText(toHostError(e))],
+    });
   } finally {
     try {
       closeSync(fd);
@@ -113,7 +90,7 @@ export function takeInheritedPolicy(
       // The descriptor is only ours to read once.
     }
   }
-  return ok(Buffer.concat(chunks).toString('utf8'));
+  return ok(new Uint8Array(Buffer.concat(chunks)));
 }
 
 export interface PolicyRequest {
@@ -125,46 +102,35 @@ export interface PolicyRequest {
 }
 
 /**
- * Resolves the run's policy like moonrun's `main` + `Runtime::new`: an inherited policy wins and
- * cannot be replaced from the command line; otherwise `--policy` is read; with neither, the run
- * is unrestricted (`undefined`). The inherited variable is always removed from `env`.
- * Call this before argument parsing, as moonrun does.
+ * moonrun's `main` + `Runtime::new` policy steps in one call (the CLI does them around
+ * argument parsing): an inherited policy wins; otherwise `--policy` is read; with neither
+ * the run is unrestricted (`undefined`). The inherited variable is always removed from `env`.
  */
 export function loadRunPolicy(
   request: PolicyRequest = {},
-): Result<LoadedPolicy | undefined, PolicyError> {
-  const env = request.env ?? process.env;
-  const inherited = takeInheritedPolicy(env);
+): Result<PolicyComponent | undefined, PolicyError> {
+  const inherited = takeInheritedPolicy(request.env ?? process.env);
   if (!inherited.ok) {
     return inherited;
   }
-  const options = { canonical: nodeCanonical, hostEnv: hostEnvEntries(env) };
-  if (inherited.value !== undefined) {
-    return loadInheritedPolicy(inherited.value, options);
-  }
-  const file = request.policyPath;
-  if (file === undefined) {
+  if (inherited.value === undefined && request.policyPath === undefined) {
     return ok(undefined);
   }
-  let contents: string;
-  const isMbtx = file.toLowerCase().endsWith('.mbtx');
-  try {
-    contents = new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file));
-  } catch (e) {
-    const detail =
-      e instanceof TypeError ? 'stream did not contain valid UTF-8' : osErrorText(toHostError(e));
-    return err({
-      chain: [
-        FILE_CONTEXT,
-        isMbtx ? `failed to read .mbtx file \`${file}\`` : `failed to read policy ${file}`,
-        detail,
-      ],
-    });
+  const module = nodeComponentModule(POLICY_URL);
+  if (!module.ok) {
+    return err({ chain: [module.error.message ?? module.error.code] });
   }
-  return loadPolicyFile(file, contents, { ...options, sourceDir: request.sourceDir });
+  const host = nodeHost();
+  const policy = new PolicyComponent(
+    module.value,
+    osCapabilities(host, (bytes) => host.stdio.writeStderr(bytes)),
+  );
+  const loaded =
+    inherited.value !== undefined
+      ? policy.loadInherited(inherited.value)
+      : policy.loadFile(request.policyPath ?? '', request.sourceDir);
+  return loaded.ok ? ok(policy) : loaded;
 }
-
-export { INHERITED_CONTEXT };
 
 /**
  * Materializes the inheritance payload as an anonymous file (created, unlinked, written with a
@@ -172,12 +138,12 @@ export { INHERITED_CONTEXT };
  * extra `stdio` entry at index >= 3 and set `MOONRUN_INHERITED_POLICY` to that index.
  * The caller closes the descriptor once the child has been created.
  */
-export function openPolicyTransfer(payload: string): number {
+export function openPolicyTransfer(payload: Uint8Array): number {
   const file = path.join(tmpdir(), `moonrun-policy-${randomBytes(8).toString('hex')}`);
   const fd = openSync(file, 'wx+', 0o600);
   try {
     unlinkSync(file);
-    const bytes = Buffer.from(payload, 'utf8');
+    const bytes = payload;
     let written = 0;
     while (written < bytes.length) {
       written += writeSync(fd, bytes, written, bytes.length - written, written);

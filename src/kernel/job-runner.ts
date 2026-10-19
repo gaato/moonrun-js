@@ -1,18 +1,23 @@
 import type { FilePort, HostFd } from '../ports/files.ts';
+import type { DnsPort } from '../ports/net.ts';
 import type { HostErrorCode } from '../ports/result.ts';
 import type { StdioPort } from '../ports/stdio.ts';
 import { type AsyncError, BADF, INVAL, IO, native } from './errors.ts';
 import type { FileLocks, HostFile } from './file.ts';
 import { startFilesystemJob } from './fs-jobs.ts';
 import type { FilesystemPayload, Job } from './job.ts';
+import { startNetworkJob } from './net-jobs.ts';
 import type { PipeEnd } from './pipe.ts';
 import type { Scheduler, Timer } from './scheduler.ts';
+import type { Socket } from './socket.ts';
 
 /** What running Jobs may use. */
 export interface JobEnvironment {
   readonly scheduler: Scheduler;
   readonly stdio: StdioPort;
   readonly files: FilePort;
+  /** Name resolution for getaddrinfo Jobs. */
+  readonly dns: DnsPort;
   readonly locks: FileLocks;
   /** Wraps a descriptor an open Job produced; the Run closes it with its last holder. */
   adoptFile(fd: HostFd, path: string): HostFile;
@@ -62,6 +67,9 @@ export function startJob(job: Job, env: JobEnvironment, done: () => void): Execu
       return streamRead(job, payload, env, done);
     case 'stream-write':
       return streamWrite(job, payload, env, done);
+    case 'bind':
+    case 'getaddrinfo':
+      return startNetworkJob(job, payload, env.dns, done);
     default:
       return startFilesystemJob(job, payload, env, done);
   }
@@ -155,6 +163,15 @@ function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: (
     }
     case 'pipe':
       return pipeRead(job, payload, resource.end, done);
+    case 'socket':
+      return socketIo(job, resource.socket, done, (socket) => {
+        const buffer = new Uint8Array(payload.len);
+        const r = socket.read(buffer);
+        if (r.ok) {
+          payload.result = buffer.subarray(0, r.value);
+        }
+        return r;
+      });
     case 'inotify':
       job.fail(INVAL);
       done();
@@ -165,6 +182,54 @@ function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: (
       done();
       return FINISHED;
   }
+}
+
+/**
+ * A blocking socket `read`/`write` from a worker thread: retried on every
+ * readiness change until it stops reporting `EAGAIN` (cancellable).
+ */
+function socketIo(
+  job: Job,
+  socket: Socket,
+  done: () => void,
+  io: (socket: Socket) => { ok: true; value: number } | { ok: false; error: AsyncError },
+): Execution {
+  let unwatch: (() => void) | undefined;
+  const attempt = (): boolean => {
+    const r = io(socket);
+    if (!r.ok && r.error.kind === 'native' && r.error.code === 'EAGAIN') {
+      return false;
+    }
+    if (r.ok) {
+      job.succeed(r.value);
+    } else {
+      job.fail(r.error);
+    }
+    return true;
+  };
+  if (attempt()) {
+    done();
+    return FINISHED;
+  }
+  unwatch = socket.watch(() => {
+    if (unwatch !== undefined && attempt()) {
+      unwatch();
+      unwatch = undefined;
+      done();
+    }
+  });
+  return {
+    interrupt: () => {
+      if (unwatch === undefined) {
+        return false;
+      }
+      unwatch();
+      unwatch = undefined;
+      job.fail(EINTR);
+      done();
+      return true;
+    },
+  };
 }
 
 /** A blocking `read`: waits (cancellably) until data or end of file. */
@@ -241,6 +306,8 @@ function streamWrite(job: Job, payload: WritePayload, env: JobEnvironment, done:
     }
     case 'pipe':
       return pipeWrite(job, payload, resource.end, done);
+    case 'socket':
+      return socketIo(job, resource.socket, done, (socket) => socket.write(payload.data));
     case 'inotify':
       job.fail(INVAL);
       done();

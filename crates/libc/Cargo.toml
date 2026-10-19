@@ -1,0 +1,7 @@
+[package]
+name = "libc"
+version = "0.2.999"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Linux/x86_64 stand-in for the libc crate: struct layouts and constants only"

@@ -1,3 +1,5 @@
+import type { Diagnostics } from '../diagnostics/diag.ts';
+import type { PolicyComponent } from '../domains/policy/component.ts';
 import type { Stdio, Utf16Writer } from '../domains/stdio.ts';
 import type { AsyncKernel } from '../kernel/async-kernel.ts';
 import type { TerminationCell } from '../kernel/termination.ts';
@@ -14,6 +16,13 @@ export interface RunContext {
   readonly termination: TerminationCell;
   /** The `moonbitlang/async` host state (shared with `moonbitlang/core`'s c_buffers). */
   readonly asyncKernel: AsyncKernel;
+  /** Trap rendering and the memory sanitizer (moonrun-diag). */
+  readonly diagnostics: Diagnostics;
+  /**
+   * The Run's policy, environment and Host Filesystem (moonrun-policy). Instantiated on
+   * first use when no policy was loaded (an unchecked Host Filesystem).
+   */
+  policy(): PolicyComponent;
   /** argv[0]: the wasm path exactly as given. */
   readonly moduleName: string;
   readonly args: readonly string[];

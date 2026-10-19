@@ -1,0 +1,19 @@
+[package]
+name = "moonutil"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The part of moon's moonutil crate that moonrun uses (verbatim files under upstream/)"
+
+[features]
+front_matter = ["dep:anyhow", "dep:serde", "dep:serde_yaml", "dep:indexmap", "dep:regex"]
+policy_transport = []
+
+[dependencies]
+os = { path = "../os" }
+anyhow = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_yaml = { workspace = true, optional = true }
+indexmap = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }

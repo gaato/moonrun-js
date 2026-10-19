@@ -50,6 +50,19 @@ export const LINUX_ERRNO: Readonly<Record<HostErrorCode, number>> = {
   ENOLCK: 37,
   EOVERFLOW: 75,
   EDQUOT: 122,
+  ENOTSOCK: 88,
+  EDESTADDRREQ: 89,
+  EMSGSIZE: 90,
+  EPROTOTYPE: 91,
+  ENOPROTOOPT: 92,
+  EPROTONOSUPPORT: 93,
+  EAFNOSUPPORT: 97,
+  ENETDOWN: 100,
+  ENETRESET: 102,
+  ENOBUFS: 105,
+  EISCONN: 106,
+  ESHUTDOWN: 108,
+  EHOSTDOWN: 112,
 };
 
 /** glibc `strerror` texts, which is what Rust's `io::Error` prints for an OS error. */
@@ -102,6 +115,19 @@ const STRERROR: Readonly<Record<HostErrorCode, string>> = {
   ENOLCK: 'No locks available',
   EOVERFLOW: 'Value too large for defined data type',
   EDQUOT: 'Disk quota exceeded',
+  ENOTSOCK: 'Socket operation on non-socket',
+  EDESTADDRREQ: 'Destination address required',
+  EMSGSIZE: 'Message too long',
+  EPROTOTYPE: 'Protocol wrong type for socket',
+  ENOPROTOOPT: 'Protocol not available',
+  EPROTONOSUPPORT: 'Protocol not supported',
+  EAFNOSUPPORT: 'Address family not supported by protocol',
+  ENETDOWN: 'Network is down',
+  ENETRESET: 'Network dropped connection on reset',
+  ENOBUFS: 'No buffer space available',
+  EISCONN: 'Transport endpoint is already connected',
+  ESHUTDOWN: 'Cannot send after transport endpoint shutdown',
+  EHOSTDOWN: 'Host is down',
 };
 
 function isKnown(code: string): code is HostErrorCode {

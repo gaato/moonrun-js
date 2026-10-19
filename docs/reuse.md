@@ -23,7 +23,7 @@
 ## 構成
 - `crates/` を 1 つの Cargo workspace にし、ロックファイルは moon の `Cargo.lock` に揃える（toml などの版がずれるとエラー文言が変わる）。共有の支援 crate: `os`（std の OS 呼び出しを host import に置き換えたもの）、`libc`（Linux/x86_64 の構造体配置と定数の偽物）、`tempfile`、`moonutil`（一部）。
 - 読み込むタイミングごとに 1 つの wasm: `moonrun-policy`（`--policy`・継承ポリシー・legacy fs）、`moonrun-diag`（trap とサニタイザ）、`moonrun-cli`。`tls-engine` も workspace に入れる。
-- `scripts/sync-upstream.ts`: `upstream.lock.json` の pin とファイル一覧から `git show <pin>:<path>` で `crates/<crate>/upstream/<path>` に取り出し（コミットする）、書き換え規則を適用して件数を検査し、件数が変わったら失敗する。`--check` を CI で回す。
+- `scripts/sync-upstream.ts`: submodule `upstream/moon` の pin（`scripts/upstream.ts`）と `crates/upstream.json` のファイル一覧から `git show <pin>:<path>` で `crates/<crate>/upstream/<path>` に取り出し（コミットする）、書き換え規則を適用して件数を検査し、件数が変わったら失敗する。`--check` を CI で回す。
 - 許す書き換えは機械的なものだけ: `std::os::(unix|fd)::` → `crate::os::…`、`std::fs::…` → `crate::os::fs::…`、`std::env::…` → `crate::os::env::…`、`Path::new(x).{is_file,is_dir,exists}()` → `crate::os::path::…`。`eprintln!` は shim 側のマクロで host の stderr に送る。
 - `build-wasm.ts`（`build-tls.ts` と同じ形）: ビルド済み `.wasm` をコミットし、import を許可リストと照合する。
 - 境界は tls-engine と同じ C ABI（`*_alloc`/`*_free`、結果は `*_result_ptr`/`_len` で読む、状態はモジュール内、Linux errno、エラー連鎖は JSON 配列）。
@@ -33,3 +33,10 @@
 - `io::Error::from_raw_os_error(n)` の表示は "operation successful (os error n)" になる。shim は host の strerror の文言でエラーを作る（代わりに `raw_os_error()` は None）。
 - `#[path]` を inline の `mod` の中で使うと、ディレクトリが実在する必要がある。
 - shim から呼べるのは `pub(crate)`/`pub(super)` の項目だけ。
+
+## 実装状況（2026-10-19）
+- `crates/` は 1 つの workspace（`os`・`libc`・`tempfile`・`moonutil` と `moonrun-policy`・`moonrun-diag`・`moonrun-cli`、テスト専用の `stat-layout`）。`tls-engine` は別 workspace のまま（依存の版を moon に揃えず、パッチ済み ring を `.cache/` に要るため）。`Cargo.lock` は `sync-upstream.ts` が moon の `Cargo.lock` に揃え、`--check` で検査する。
+- 取り出したファイルの先頭に `// upstream: moonbitlang/moon@<pin> <path> (rewrites: …)` を付け、pin が変わると `--check` が失敗する。
+- 上の 3 点: (1) `filesystem/job/mod.rs` のスタブが `Job` の名前で非公開の検査を橋渡しする（`Job::check_policy` の対応表は手で上流に合わせる）。(2) `write_bytes_to_file*` は「バイト列でない」を境界で渡し、拒否が先に勝つ。(3) 受け入れた。legacy fs を使う実行は初回呼び出しで約 1ms の compile を払う。
+- `main.rs` は丸ごと取り出し、`crates/moonrun-cli/build.rs` が `struct Commandline` だけを切り出す。
+- `process/mod.rs` の `ChildAuthority` は OS 依存のファイルにあるので TS（`src/domains/policy/child-authority.ts`）のまま。

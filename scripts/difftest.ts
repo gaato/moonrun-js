@@ -22,12 +22,11 @@
 //
 // Only differences listed in docs/divergences.md are normalized (D1: wasm://wasm/<hash>),
 // plus the run's own pid and the temp working directory path.
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   cpSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -40,6 +39,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { checkoutUpstream } from './upstream.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 // The toolchain binary, not ~/.moon/bin/moonrun: the moonup shim adds variables to the child env.
@@ -116,16 +116,7 @@ function sh(cmd: string, args: readonly string[], cwd: string, env?: Record<stri
 }
 
 function asyncCheckout(): string {
-  const lock = JSON.parse(readFileSync(path.join(repoRoot, 'upstream.lock.json'), 'utf8')) as {
-    async: { commit: string };
-  };
-  const dir = path.join(repoRoot, '.cache', 'upstream', 'async');
-  if (!existsSync(dir)) {
-    const source = path.join(homedir(), 'ghq/github.com/moonbitlang/async');
-    execFileSync('git', ['clone', '--quiet', source, dir]);
-  }
-  execFileSync('git', ['-C', dir, 'checkout', '--quiet', '--detach', lock.async.commit]);
-  return dir;
+  return checkoutUpstream('async', path.join(repoRoot, '.cache', 'upstream', 'async'));
 }
 
 function buildMoon(spec: MoonSpec): string {

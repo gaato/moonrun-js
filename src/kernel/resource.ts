@@ -7,6 +7,7 @@ import { canonical, type Handle, type HostKeys } from './handles.ts';
 import type { Inotify } from './inotify.ts';
 import type { PipeEnd } from './pipe.ts';
 import type { Pollable } from './readiness.ts';
+import type { Socket } from './socket.ts';
 
 /** A standard stream of the embedding process. */
 export type StdioStream = 0 | 1 | 2;
@@ -27,7 +28,9 @@ export type Resource =
   /** A host file descriptor opened by an open Job (files, directories, devices, FIFOs). */
   | { readonly kind: 'file'; readonly file: HostFile }
   /** `fs/inotify/create`. */
-  | { readonly kind: 'inotify'; readonly inotify: Inotify };
+  | { readonly kind: 'inotify'; readonly inotify: Inotify }
+  /** A TCP or UDP socket (`make_tcp_socket`, `make_udp_socket`, `accept`). */
+  | { readonly kind: 'socket'; readonly socket: Socket };
 
 /** The poll target of a resource, or `undefined` when epoll would refuse it (`EPERM`). */
 export function pollableOf(resource: Resource): Pollable | undefined {
@@ -38,6 +41,8 @@ export function pollableOf(resource: Resource): Pollable | undefined {
       return resource.source;
     case 'inotify':
       return resource.inotify;
+    case 'socket':
+      return resource.socket;
     case 'invalid':
     case 'stdio':
     // Opened files take the thread pool (regular files and directories cannot be
@@ -61,6 +66,9 @@ function releaseResource(resource: Resource): void {
     case 'inotify':
       resource.inotify.close();
       return;
+    case 'socket':
+      resource.socket.release();
+      return;
     case 'invalid':
     case 'stdio':
     case 'completion-source':
@@ -74,6 +82,8 @@ export function acquire(resource: Resource): Resource {
     resource.end.retain();
   } else if (resource.kind === 'file') {
     resource.file.retain();
+  } else if (resource.kind === 'socket') {
+    resource.socket.retain();
   }
   return resource;
 }

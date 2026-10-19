@@ -1,4 +1,4 @@
-import { loadSourceMap, type SourceMap, type SourceMapIo } from '../diagnostics/source-map.ts';
+import type { Diagnostics, SourceMap } from '../diagnostics/diag.ts';
 import { err, ok, type Result } from '../ports/result.ts';
 import { stringImports } from './js-string.ts';
 
@@ -7,6 +7,8 @@ export interface LoadedModule {
   readonly module: WebAssembly.Module;
   /** Diagnostic name and argv[0]: the path exactly as given. */
   readonly name: string;
+  /** Renders this module's traps and runs its memory sanitizer (moonrun-diag). */
+  readonly diagnostics: Diagnostics;
   readonly sourceMap: SourceMap | undefined;
   /** Imports that fill `wasm:js-string` / `_` when the engine did not resolve them natively. */
   readonly stringImports: WebAssembly.Imports;
@@ -25,15 +27,20 @@ const COMPILE_OPTIONS: WebAssembly.CompileOptions = {
 export function fromCompiled(
   module: WebAssembly.Module,
   name: string,
+  diagnostics: Diagnostics,
   sourceMap?: SourceMap,
 ): LoadedModule {
-  return { module, name, sourceMap, stringImports: stringImports(module) };
+  return { module, name, diagnostics, sourceMap, stringImports: stringImports(module) };
 }
 
+/**
+ * Compiles a guest; its source map (`sourceMappingURL` or `<name>.map`) is loaded now,
+ * through `diagnostics`' reader, as moonrun does when it loads the file.
+ */
 export function compileBytes(
   bytes: Uint8Array,
   name: string,
-  sourceMapIo?: SourceMapIo,
+  diagnostics: Diagnostics,
 ): Result<LoadedModule, HostFailure> {
   let module: WebAssembly.Module;
   try {
@@ -43,6 +50,5 @@ export function compileBytes(
     const cause = e instanceof Error ? `Uncaught ${e.name}: ${e.message}` : `Uncaught ${String(e)}`;
     return err({ chain: [`failed to compile \`${name}\``, cause] });
   }
-  const sourceMap = sourceMapIo === undefined ? undefined : loadSourceMap(name, bytes, sourceMapIo);
-  return ok(fromCompiled(module, name, sourceMap));
+  return ok(fromCompiled(module, name, diagnostics, diagnostics.loadSourceMap(name, bytes)));
 }

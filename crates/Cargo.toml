@@ -1,0 +1,37 @@
+# Wasm components built from moonrun's own Rust source (docs/reuse.md).
+# Upstream files live verbatim under <crate>/upstream/ (scripts/sync-upstream.ts);
+# scripts/build-wasm.ts builds the shipped .wasm files.
+#
+# tls-engine stays a separate workspace: its dependency versions are pinned on
+# their own (not to moon's Cargo.lock) and it builds against a patched ring that
+# scripts/build-tls.ts prepares in .cache/.
+[workspace]
+resolver = "3"
+members = ["os", "libc", "tempfile", "moonutil", "moonrun-policy", "moonrun-diag", "moonrun-cli", "stat-layout"]
+exclude = ["tls-engine"]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Same requirements as moon's workspace Cargo.toml; the exact versions come from
+# Cargo.lock, aligned with moon's by `node scripts/sync-upstream.ts` (error texts
+# of serde_json / toml / serde_yaml / clap are part of the observable behavior).
+[workspace.dependencies]
+anyhow = "1.0.86"
+clap = { version = "4.5.4", features = ["derive", "string", "env"] }
+indexmap = { version = "2", features = ["serde"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.97", features = ["preserve_order"] }
+serde_yaml = "0.9.33"
+thiserror = "2"
+toml = { version = "0.9.5", default-features = false, features = ["parse", "serde", "std"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

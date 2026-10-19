@@ -1,7 +1,12 @@
 import { randomFillSync } from 'node:crypto';
 import type { Host } from '../../ports/host.ts';
+import { nodeComponents } from './components.ts';
+
+export { nodeDiagnostics } from './components.ts';
+
 import { nodeFiles } from './files.ts';
 import { nodeFs } from './fs.ts';
+import { nodeDns, nodeNet } from './net.ts';
 import { nodeStdio } from './stdio.ts';
 
 export interface NodeHostOptions {
@@ -38,6 +43,9 @@ export function nodeHost(options: NodeHostOptions = {}): Host {
     },
     fs: nodeFs(cwd),
     files: nodeFiles(cwd),
+    components: nodeComponents(),
+    net: nodeNet(),
+    dns: nodeDns(),
     platform: { currentExe: options.currentExe, pid: process.pid },
   };
 }

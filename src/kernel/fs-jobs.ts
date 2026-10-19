@@ -72,11 +72,13 @@ function descriptor(resource: Resource): Result<HostFd | undefined, AsyncError> 
     case 'pipe':
     case 'completion-source':
     case 'inotify':
+    case 'socket':
       return ok(undefined);
   }
 }
 
 const S_IFIFO = 0o010000n;
+const S_IFSOCK = 0o140000n;
 
 /** `fstat` of a resource; pipes and the inotify instance have no host descriptor (D15). */
 async function fstatOf(
@@ -90,7 +92,12 @@ async function fstatOf(
   if (fd.value !== undefined) {
     return lift(await env.files.async.fstat(fd.value));
   }
-  const mode = resource.kind === 'inotify' ? 0n : S_IFIFO | 0o600n;
+  const mode =
+    resource.kind === 'inotify'
+      ? 0n
+      : resource.kind === 'socket'
+        ? S_IFSOCK | 0o777n
+        : S_IFIFO | 0o600n;
   return ok({
     kind: 'other',
     dev: 0n,
@@ -186,6 +193,8 @@ async function open(payload: Of<'open'>, env: JobEnvironment): Promise<Result<nu
     return err(hostFailure(fd.error));
   }
   const file = env.adoptFile(fd.value, payload.path);
+  const canonical = await env.files.async.realpath(payload.path);
+  file.canonicalPath = canonical.ok ? lossyPath(canonical.value) : undefined;
   const stat = await env.files.async.fstat(fd.value);
   if (!stat.ok) {
     file.release();
@@ -237,6 +246,12 @@ async function rename(
 const ACCESS_MODES = ['exists', 'read', 'write', 'execute'] as const;
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/** Host path bytes as the string ports use (U+FFFD for invalid UTF-8, D4). */
+function lossyPath(bytes: Uint8Array): string {
+  return decoder.decode(bytes);
+}
 
 async function specials(fd: HostFd, env: JobEnvironment): Promise<DirectoryRecord[]> {
   const self = await env.files.async.fstat(fd);
@@ -366,6 +381,8 @@ export function lockOwner(resource: Resource): object {
       return resource.source;
     case 'inotify':
       return resource.inotify;
+    case 'socket':
+      return resource.socket;
     case 'stdio':
     case 'invalid':
       return resource;

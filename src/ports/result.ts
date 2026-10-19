@@ -63,7 +63,20 @@ export type HostErrorCode =
   | 'EMLINK'
   | 'ENOLCK'
   | 'EOVERFLOW'
-  | 'EDQUOT';
+  | 'EDQUOT'
+  | 'ENOTSOCK'
+  | 'EDESTADDRREQ'
+  | 'EMSGSIZE'
+  | 'EPROTOTYPE'
+  | 'ENOPROTOOPT'
+  | 'EPROTONOSUPPORT'
+  | 'EAFNOSUPPORT'
+  | 'ENETDOWN'
+  | 'ENETRESET'
+  | 'ENOBUFS'
+  | 'EISCONN'
+  | 'ESHUTDOWN'
+  | 'EHOSTDOWN';
 
 export interface HostError {
   readonly code: HostErrorCode;

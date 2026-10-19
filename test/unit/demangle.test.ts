@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { demangleMangledFunctionName as demangle } from '../../src/diagnostics/demangle.ts';
+import { nodeDiagnostics } from '../../src/hosts/node/components.ts';
+
+// moonutil's demangle.rs (in moonrun-diag) against its own test vectors.
+const diagnostics = nodeDiagnostics();
+const demangle = (name: string): string => diagnostics.demangle(name);
 
 describe('demangleMangledFunctionName', () => {
   it('demangle tags', () => {

@@ -14,7 +14,7 @@ MoonBit の `moonrun`（toolchain 同梱の wasm ランナー、Rust + V8）を 
 
 ## 確定する設計判断（後戻りしにくいもの）
 
-1. **互換の基準は installed moonrun `0.1.20261012 (748b63c)`**。参照 clone を main の最新にした後も、生成・参照は `git show 748b63c:crates/moonrun/...` で基準 commit から行い、`upstream.lock.json` に `{moon, async}` の commit を pin。
+1. **互換の基準は installed moonrun `0.1.20261012 (748b63c)`**。参照 clone を main の最新にした後も、生成・参照は `git show 748b63c:crates/moonrun/...` で基準 commit から行い、`upstream/moon`・`upstream/async`（shallow submodule、gitlink が pin）で commit を固定し、読み出しは `scripts/upstream.ts` に集約。
 2. **常に Linux として振る舞う**: `get_platform`=Linux、`is_windows`=0。errno / strerror / `EAI_*` / sockaddr / stat 構造体は固定の Linux テーブル（`os.constants` は使わない）。`*/windows`・macOS 専用の "fake" import は呼ばれたら throw するスタブ。
 3. **JSPI 必須**。Asyncify・Worker+Atomics の代替経路は作らない（ポート interface は `T | Promise<T>` にしておき将来の余地だけ残す）。対象は Node ≥ 24、Deno、Bun、現行ブラウザ。Node 22 は切る。
 4. **仮想カーネルは JS が持つ**: WASI も `node:wasi` を使わず自前、ハンドル・poller・スレッドプール・パイプは TS の状態機械。
@@ -164,7 +164,7 @@ mise（node 24/26, deno, bun, pnpm, rust + wasm32-unknown-unknown, wasm-tools, b
 | 永久 pending の終了で Node が exit 13 | ref 付きハンドル保持 + race | P1 |
 | stdio の EAGAIN・順序 | writeSync/readSync + リトライ、process.stdout 不使用 | P1 |
 | BigInt i64 のコスト | P2 で計測（境界の BigInt は変えられない） | P2 |
-| 基準のずれと async import の変動 | upstream.lock.json、pin 済み `git show` から生成、nightly 検査 | 全期間 |
+| 基準のずれと async import の変動 | submodule の pin、pin 済み `git show` から生成（`scripts/upstream.ts`）、nightly 検査 | 全期間 |
 | rust wasm ツールチェーン / ring の getrandom | S7、rustls-rustcrypto に退避 | P4 |
 | Node の bind=listen、Deno/Bun の半閉じ | S6、乖離として文書化 | P3 |
 | SQLite の VFS と版の一致 | S8、自前 wasi-sdk ビルドも候補 | P5 |

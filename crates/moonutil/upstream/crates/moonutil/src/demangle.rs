@@ -1,0 +1,959 @@
+// upstream: moonbitlang/moon@748b63c25261be2ec38b2cc70884d5894a456360 crates/moonutil/src/demangle.rs (rewrites: none)
+// moon: The build system and package manager for MoonBit.
+// Copyright (C) 2026 International Digital Economy Academy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// For inquiries, you can contact us via e-mail at jichuruanjian@idea.edu.cn.
+
+/// Demangles a MoonBit function symbol, or returns it unchanged if it is not
+/// recognized as a valid function name.
+pub fn demangle_mangled_function_name(func_name: &str) -> String {
+    demangle_mangled_function_name_impl(func_name).unwrap_or_else(|| func_name.to_string())
+}
+
+#[derive(Debug)]
+enum DemangledSymbol {
+    Function {
+        pkg: String,
+        name: String,
+        suffix_before: String,
+        type_args: Option<String>,
+        suffix_after: String,
+    },
+    Method {
+        type_path: TypePath,
+        method_name: String,
+        suffix_before: String,
+        type_args: Option<String>,
+        suffix_after: String,
+    },
+    TraitImplMethod {
+        impl_type: TypePath,
+        trait_type: TypePath,
+        method_name: String,
+        fn_suffix: String,
+        type_args: Option<String>,
+    },
+    ExtensionMethod {
+        type_path: TypePath,
+        method_pkg: String,
+        method_name: String,
+        suffix_before: String,
+        type_args: Option<String>,
+        suffix_after: String,
+    },
+    Local {
+        ident: String,
+        stamp: String,
+    },
+}
+
+#[derive(Debug)]
+struct TypePath {
+    pkg: String,
+    type_name: String,
+}
+
+fn demangle_mangled_function_name_impl(func_name: &str) -> Option<String> {
+    let (symbol, j) = parse_mangled_symbol(func_name)?;
+    if j < func_name.len() {
+        match byte_at(func_name, j) {
+            Some(b'.' | b'$' | b'@') => {}
+            _ => return None,
+        }
+    }
+    Some(render_symbol(&symbol))
+}
+
+fn parse_mangled_symbol(func_name: &str) -> Option<(DemangledSymbol, usize)> {
+    if func_name.is_empty() {
+        return None;
+    }
+
+    let mut i = 0usize;
+    if byte_at(func_name, 0) == Some(b'$') {
+        i = 1;
+    }
+    if func_name.len().saturating_sub(i) < 3 {
+        return None;
+    }
+    if byte_at(func_name, i) != Some(b'_')
+        || byte_at(func_name, i + 1) != Some(b'M')
+        || byte_at(func_name, i + 2) != Some(b'0')
+    {
+        return None;
+    }
+    i += 3;
+    if i >= func_name.len() {
+        return None;
+    }
+
+    let tag = byte_at(func_name, i)?;
+    i += 1;
+
+    match tag {
+        b'F' => parse_function_symbol(func_name, i),
+        b'M' => parse_method_symbol(func_name, i),
+        b'I' => parse_trait_impl_method_symbol(func_name, i),
+        b'E' => parse_extension_method_symbol(func_name, i),
+        b'L' => parse_local_symbol(func_name, i),
+        _ => None,
+    }
+}
+
+fn parse_function_symbol(s: &str, i: usize) -> Option<(DemangledSymbol, usize)> {
+    let (pkg, pkg_end) = parse_package(s, i)?;
+    let (name, j) = parse_identifier(s, pkg_end)?;
+    let (suffix_before, j) = parse_fn_suffix_text(s, j)?;
+    let (type_args, j) = parse_optional_type_args_text(s, j)?;
+    let (suffix_after, j) = parse_fn_suffix_text(s, j)?;
+    Some((
+        DemangledSymbol::Function {
+            pkg,
+            name,
+            suffix_before,
+            type_args,
+            suffix_after,
+        },
+        j,
+    ))
+}
+
+fn parse_method_symbol(s: &str, i: usize) -> Option<(DemangledSymbol, usize)> {
+    let (type_path, type_end) = parse_type_path(s, i, false)?;
+    let (method_name, method_end) = parse_identifier(s, type_end)?;
+    let (suffix_before, j) = parse_fn_suffix_text(s, method_end)?;
+    let (type_args, j) = parse_optional_type_args_text(s, j)?;
+    let (suffix_after, j) = parse_fn_suffix_text(s, j)?;
+
+    Some((
+        DemangledSymbol::Method {
+            type_path,
+            method_name,
+            suffix_before,
+            type_args,
+            suffix_after,
+        },
+        j,
+    ))
+}
+
+fn parse_trait_impl_method_symbol(s: &str, i: usize) -> Option<(DemangledSymbol, usize)> {
+    let (impl_type, impl_end) = parse_type_path(s, i, false)?;
+    let (trait_type, trait_end) = parse_type_path(s, impl_end, false)?;
+    let (method_name, method_end) = parse_identifier(s, trait_end)?;
+    let (suffix_before, j) = parse_fn_suffix_text(s, method_end)?;
+    let (type_args, j) = parse_optional_type_args_text(s, j)?;
+    let (suffix_after, j) = parse_fn_suffix_text(s, j)?;
+    let mut fn_suffix = suffix_before;
+    fn_suffix.push_str(&suffix_after);
+
+    Some((
+        DemangledSymbol::TraitImplMethod {
+            impl_type,
+            trait_type,
+            method_name,
+            fn_suffix,
+            type_args,
+        },
+        j,
+    ))
+}
+
+fn parse_extension_method_symbol(s: &str, i: usize) -> Option<(DemangledSymbol, usize)> {
+    let (type_path, type_name_end) = parse_type_path(s, i, true)?;
+    let (method_pkg, method_pkg_end) = parse_package(s, type_name_end)?;
+    let (method_name, method_name_end) = parse_identifier(s, method_pkg_end)?;
+    let (suffix_before, j) = parse_fn_suffix_text(s, method_name_end)?;
+    let (type_args, j) = parse_optional_type_args_text(s, j)?;
+    let (suffix_after, j) = parse_fn_suffix_text(s, j)?;
+
+    Some((
+        DemangledSymbol::ExtensionMethod {
+            type_path,
+            method_pkg,
+            method_name,
+            suffix_before,
+            type_args,
+            suffix_after,
+        },
+        j,
+    ))
+}
+
+fn parse_local_symbol(s: &str, i: usize) -> Option<(DemangledSymbol, usize)> {
+    let mut j = i;
+    if byte_at(s, j) == Some(b'm') {
+        j += 1;
+    }
+
+    let (ident, ident_end) = parse_identifier(s, j)?;
+    j = ident_end;
+
+    if byte_at(s, j) != Some(b'S') {
+        return None;
+    }
+    j += 1;
+    if !byte_at(s, j).is_some_and(is_digit) {
+        return None;
+    }
+    let stamp_start = j;
+    while byte_at(s, j).is_some_and(is_digit) {
+        j += 1;
+    }
+    let stamp = s[stamp_start..j].to_string();
+
+    Some((DemangledSymbol::Local { ident, stamp }, j))
+}
+
+fn parse_fn_suffix_text(s: &str, mut i: usize) -> Option<(String, usize)> {
+    let mut suffix = String::new();
+
+    while byte_at(s, i) == Some(b'N') {
+        let (nested_name, nested_end) = parse_identifier(s, i + 1)?;
+        suffix.push('.');
+        suffix.push_str(&nested_name);
+        i = nested_end;
+
+        if byte_at(s, i) != Some(b'S') {
+            return None;
+        }
+        i += 1;
+        if !byte_at(s, i).is_some_and(is_digit) {
+            return None;
+        }
+        let stamp_start = i;
+        while byte_at(s, i).is_some_and(is_digit) {
+            i += 1;
+        }
+        suffix.push_str("[stamp=");
+        suffix.push_str(&s[stamp_start..i]);
+        suffix.push(']');
+    }
+
+    if byte_at(s, i) == Some(b'C') {
+        i += 1;
+
+        if !byte_at(s, i).is_some_and(is_digit) {
+            return None;
+        }
+        let uuid_start = i;
+        while byte_at(s, i).is_some_and(is_digit) {
+            i += 1;
+        }
+
+        suffix.push_str(".anonymous[uuid=");
+        suffix.push_str(&s[uuid_start..i]);
+
+        // New schema carries optional line info as `l<line>`.
+        if byte_at(s, i) == Some(b'l') {
+            i += 1;
+            let line_start = i;
+            if !byte_at(s, i).is_some_and(is_digit) {
+                return None;
+            }
+            while byte_at(s, i).is_some_and(is_digit) {
+                i += 1;
+            }
+
+            suffix.push_str(",line=");
+            suffix.push_str(&s[line_start..i]);
+        }
+        suffix.push(']');
+    }
+
+    Some((suffix, i))
+}
+
+fn parse_type_path(s: &str, i: usize, omit_core_prefix: bool) -> Option<(TypePath, usize)> {
+    let (mut pkg, pkg_end) = parse_package(s, i)?;
+    let (mut type_name, mut k) = parse_identifier(s, pkg_end)?;
+
+    if byte_at(s, k) == Some(b'L') {
+        let (local, local_end) = parse_identifier(s, k + 1)?;
+        type_name.push('.');
+        type_name.push_str(&local);
+        k = local_end;
+    }
+
+    if omit_core_prefix && is_core_package(&pkg) {
+        pkg.clear();
+    }
+
+    Some((TypePath { pkg, type_name }, k))
+}
+
+fn parse_type_ref_text(s: &str, i: usize) -> Option<(String, usize)> {
+    let (path, mut j) = parse_type_path(s, i, false)?;
+    let mut text = render_type_path(&path);
+    if byte_at(s, j) == Some(b'G') {
+        let (args, args_end) = parse_type_args_text(s, j)?;
+        text.push_str(&args);
+        j = args_end;
+    }
+    Some((text, j))
+}
+
+fn parse_type_list_until_e(s: &str, mut i: usize) -> Option<(Vec<String>, usize)> {
+    let mut items = Vec::new();
+    while byte_at(s, i) != Some(b'E') {
+        let (item, item_end) = parse_type_text(s, i)?;
+        items.push(item);
+        i = item_end;
+    }
+    Some((items, i + 1))
+}
+
+fn parse_fn_type_text(s: &str, i: usize) -> Option<(String, usize)> {
+    let mut j = i;
+    let is_async = byte_at(s, j) == Some(b'V');
+    if is_async {
+        j += 1;
+    }
+    let is_nocancel = is_async && byte_at(s, j) == Some(b'N');
+    if is_nocancel {
+        j += 1;
+    }
+    let is_raw = byte_at(s, j) == Some(b'X');
+    if is_raw {
+        j += 1;
+    }
+    if byte_at(s, j) != Some(b'W') {
+        return None;
+    }
+
+    let (params, mut j) = parse_type_list_until_e(s, j + 1)?;
+
+    let (ret, ret_end) = parse_type_text(s, j)?;
+    j = ret_end;
+
+    let mut raises = String::new();
+    if byte_at(s, j) == Some(b'Q') {
+        let (raised, raised_end) = parse_type_text(s, j + 1)?;
+        raises = format!(" raise {raised}");
+        j = raised_end;
+    }
+
+    let async_prefix = if is_async { "async " } else { "" };
+    let nocancel_suffix = if is_nocancel {
+        if raises.is_empty() {
+            " nocancel"
+        } else {
+            " + nocancel"
+        }
+    } else {
+        ""
+    };
+    let signature = format!(
+        "{async_prefix}({}) -> {ret}{raises}{nocancel_suffix}",
+        params.join(", ")
+    );
+    if is_raw {
+        Some((format!("FuncRef[{signature}]"), j))
+    } else {
+        Some((signature, j))
+    }
+}
+
+fn parse_type_args_text(s: &str, i: usize) -> Option<(String, usize)> {
+    let mut j = i;
+    let mut args_prefix = String::new();
+
+    if byte_at(s, j) == Some(b'G') {
+        let (args, args_end) = parse_type_list_until_e(s, j + 1)?;
+        args_prefix = format!("[{}]", args.join(", "));
+        j = args_end;
+    }
+
+    let mut raise_suffix = String::new();
+    if byte_at(s, j) == Some(b'H') {
+        let (raised, raised_end) = parse_type_text(s, j + 1)?;
+        raise_suffix = format!(" raise {raised}");
+        j = raised_end;
+    }
+
+    Some((format!("{args_prefix}{raise_suffix}"), j))
+}
+
+fn parse_optional_type_args_text(s: &str, i: usize) -> Option<(Option<String>, usize)> {
+    if matches!(byte_at(s, i), Some(b'G' | b'H')) {
+        let (args, j) = parse_type_args_text(s, i)?;
+        Some((Some(args), j))
+    } else {
+        Some((None, i))
+    }
+}
+
+fn parse_type_text(s: &str, i: usize) -> Option<(String, usize)> {
+    let c = byte_at(s, i)?;
+    match c {
+        b'i' => Some(("Int".to_string(), i + 1)),
+        b'l' => Some(("Int64".to_string(), i + 1)),
+        b'h' => Some(("Int16".to_string(), i + 1)),
+        b'j' => Some(("UInt".to_string(), i + 1)),
+        b'k' => Some(("UInt16".to_string(), i + 1)),
+        b'm' => Some(("UInt64".to_string(), i + 1)),
+        b'd' => Some(("Double".to_string(), i + 1)),
+        b'f' => Some(("Float".to_string(), i + 1)),
+        b'b' => Some(("Bool".to_string(), i + 1)),
+        b'c' => Some(("Char".to_string(), i + 1)),
+        b's' => Some(("String".to_string(), i + 1)),
+        b'u' => Some(("Unit".to_string(), i + 1)),
+        b'y' => Some(("Byte".to_string(), i + 1)),
+        b'z' => Some(("Bytes".to_string(), i + 1)),
+        b'v' => Some(("V128".to_string(), i + 1)),
+        b'A' => {
+            let (inner, inner_end) = parse_type_text(s, i + 1)?;
+            Some((format!("FixedArray[{inner}]"), inner_end))
+        }
+        b'N' => {
+            let (inner, inner_end) = parse_type_text(s, i + 1)?;
+            Some((format!("ReadOnlyArray[{inner}]"), inner_end))
+        }
+        b'O' => {
+            let (inner, inner_end) = parse_type_text(s, i + 1)?;
+            Some((format!("Option[{inner}]"), inner_end))
+        }
+        b'U' => {
+            let (elems, j) = parse_type_list_until_e(s, i + 1)?;
+            Some((format!("({})", elems.join(", ")), j))
+        }
+        b'V' | b'X' | b'W' => parse_fn_type_text(s, i),
+        b'R' => parse_type_ref_text(s, i + 1),
+        _ => None,
+    }
+}
+
+fn render_symbol(symbol: &DemangledSymbol) -> String {
+    match symbol {
+        DemangledSymbol::Function {
+            pkg,
+            name,
+            suffix_before,
+            type_args,
+            suffix_after,
+        } => {
+            let mut text = render_qualified_name(pkg, name);
+            text.push_str(suffix_before);
+            if let Some(type_args) = type_args {
+                text.push_str(type_args);
+            }
+            text.push_str(suffix_after);
+            text
+        }
+        DemangledSymbol::Method {
+            type_path,
+            method_name,
+            suffix_before,
+            type_args,
+            suffix_after,
+        } => {
+            let mut text = render_type_path(type_path);
+            text.push_str("::");
+            text.push_str(method_name);
+            text.push_str(suffix_before);
+            if let Some(type_args) = type_args {
+                text.push_str(type_args);
+            }
+            text.push_str(suffix_after);
+            text
+        }
+        DemangledSymbol::TraitImplMethod {
+            impl_type,
+            trait_type,
+            method_name,
+            fn_suffix,
+            type_args,
+        } => {
+            let mut text = format!(
+                "impl {} for {}",
+                render_type_path(trait_type),
+                render_type_path(impl_type)
+            );
+            if let Some(type_args) = type_args {
+                text.push_str(type_args);
+            }
+            text.push_str(&format!(" with {method_name}{fn_suffix}"));
+            text
+        }
+        DemangledSymbol::ExtensionMethod {
+            type_path,
+            method_pkg,
+            method_name,
+            suffix_before,
+            type_args,
+            suffix_after,
+        } => {
+            let type_text = render_type_path(type_path);
+            let mut text = if method_pkg.is_empty() {
+                type_text
+            } else {
+                let type_use = type_text.strip_prefix('@').unwrap_or(&type_text);
+                format!("@{method_pkg}.{type_use}")
+            };
+            text.push_str("::");
+            text.push_str(method_name);
+            text.push_str(suffix_before);
+            if let Some(type_args) = type_args {
+                text.push_str(type_args);
+            }
+            text.push_str(suffix_after);
+            text
+        }
+        DemangledSymbol::Local { ident, stamp } => {
+            let no_dollar = ident.strip_prefix('$').unwrap_or(ident);
+            let shown = strip_suffix(no_dollar, ".fn");
+            if shown.contains('/') {
+                format!("@{shown}/{stamp}")
+            } else {
+                format!("{shown}/{stamp}")
+            }
+        }
+    }
+}
+
+fn render_type_path(path: &TypePath) -> String {
+    render_qualified_name(&path.pkg, &path.type_name)
+}
+
+fn render_qualified_name(pkg: &str, name: &str) -> String {
+    if pkg.is_empty() {
+        name.to_string()
+    } else {
+        format!("@{pkg}.{name}")
+    }
+}
+
+fn parse_package(s: &str, mut i: usize) -> Option<(String, usize)> {
+    if byte_at(s, i) != Some(b'P') {
+        return None;
+    }
+    i += 1;
+
+    if byte_at(s, i) == Some(b'B') {
+        return Some(("moonbitlang/core/builtin".to_string(), i + 1));
+    }
+
+    if byte_at(s, i) == Some(b'C') {
+        let (suffix, end) = parse_counted_package_segments(s, i + 1)?;
+        let full = if suffix.is_empty() {
+            "moonbitlang/core".to_string()
+        } else {
+            format!("moonbitlang/core/{suffix}")
+        };
+        return Some((full, end));
+    }
+
+    parse_counted_package_segments(s, i)
+}
+
+fn parse_counted_package_segments(s: &str, i: usize) -> Option<(String, usize)> {
+    // In v0 the count is not delimited from the first segment length. Keep the
+    // established one-digit interpretation until the format is made unambiguous.
+    let digit = byte_at(s, i)?;
+    if !is_digit(digit) {
+        return None;
+    }
+    parse_package_segments(s, i + 1, (digit - b'0') as u32)
+}
+
+fn parse_package_segments(s: &str, mut i: usize, count: u32) -> Option<(String, usize)> {
+    let mut segs = Vec::new();
+    for _ in 0..count {
+        let (seg, seg_end) = parse_identifier(s, i)?;
+        segs.push(seg);
+        i = seg_end;
+    }
+    Some((segs.join("/"), i))
+}
+
+fn parse_identifier(s: &str, i: usize) -> Option<(String, usize)> {
+    let (n, start) = parse_u32(s, i)?;
+    let n = usize::try_from(n).ok()?;
+    let end = start.checked_add(n)?;
+    let raw = s.as_bytes().get(start..end)?;
+
+    let out = decode_identifier_bytes(raw)?;
+    Some((out, end))
+}
+
+fn parse_u32(s: &str, mut i: usize) -> Option<(u32, usize)> {
+    if !byte_at(s, i).is_some_and(is_digit) {
+        return None;
+    }
+
+    let mut v = 0u32;
+    while let Some(c) = byte_at(s, i) {
+        if !is_digit(c) {
+            break;
+        }
+        v = v.checked_mul(10)?.checked_add((c - b'0') as u32)?;
+        i += 1;
+    }
+    Some((v, i))
+}
+
+fn hex_value(ch: u8) -> Option<u8> {
+    match ch {
+        b'0'..=b'9' => Some(ch - b'0'),
+        b'a'..=b'f' => Some(10 + ch - b'a'),
+        b'A'..=b'F' => Some(10 + ch - b'A'),
+        _ => None,
+    }
+}
+
+fn is_core_package(pkg: &str) -> bool {
+    let prefix = "moonbitlang/core";
+    pkg == prefix
+        || pkg
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn strip_suffix<'a>(s: &'a str, suffix: &str) -> &'a str {
+    s.strip_suffix(suffix).unwrap_or(s)
+}
+
+fn is_digit(ch: u8) -> bool {
+    ch.is_ascii_digit()
+}
+
+fn byte_at(s: &str, i: usize) -> Option<u8> {
+    s.as_bytes().get(i).copied()
+}
+
+fn decode_identifier_bytes(raw: &[u8]) -> Option<String> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut k = 0usize;
+    while k < raw.len() {
+        let c = raw[k];
+        if c != b'_' {
+            out.push(c);
+            k += 1;
+            continue;
+        }
+
+        let next = *raw.get(k + 1)?;
+        if next == b'_' {
+            out.push(b'_');
+            k += 2;
+            continue;
+        }
+
+        let hi = hex_value(next)?;
+        let lo = hex_value(*raw.get(k + 2)?)?;
+        out.push((hi << 4) | lo);
+        k += 3;
+    }
+    String::from_utf8(out).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::demangle_mangled_function_name;
+
+    #[test]
+    fn demangle_tags() {
+        assert_eq!(demangle_mangled_function_name("_M0FP13pkg3foo"), "@pkg.foo");
+        assert_eq!(
+            demangle_mangled_function_name("_M0MP13pkg4Type3bar"),
+            "@pkg.Type::bar"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0IP13pkg4ImplP13pkg5Trait3run"),
+            "impl @pkg.Trait for @pkg.Impl with run"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0EP13pkg4TypeP14util3new"),
+            "@util.pkg.Type::new"
+        );
+        assert_eq!(demangle_mangled_function_name("_M0L3fooS0"), "foo/0");
+        assert_eq!(demangle_mangled_function_name("_M0Lm7$foo.fnS12"), "foo/12");
+    }
+
+    #[test]
+    fn demangle_type_args_and_identifier_escapes() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg3fooGiE"),
+            "@pkg.foo[Int]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg4a__b"),
+            "@pkg.a_b"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg5a_2db"),
+            "@pkg.a-b"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0EP211moonbitlang4core4TypeP14util3new"),
+            "@util.Type::new"
+        );
+    }
+
+    #[test]
+    fn demangle_name_mangling_reference_elements() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0FPB5print"),
+            "@moonbitlang/core/builtin.print"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5outerN5inner"),
+            "_M0FP15myapp5outerN5inner"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5outerN5innerS42"),
+            "@myapp.outer.inner[stamp=42]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5outerC0"),
+            "@myapp.outer.anonymous[uuid=0]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5outerC245l10"),
+            "@myapp.outer.anonymous[uuid=245,line=10]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name(
+                "_M0IP05outerL5LocalP311moonbitlang4core7builtin7Default7defaultGiE"
+            ),
+            "impl @moonbitlang/core/builtin.Default for outer.Local[Int] with default"
+        );
+        assert_eq!(demangle_mangled_function_name("_M0L1xS123"), "x/123");
+        assert_eq!(demangle_mangled_function_name("_M0Lm1yS124"), "y/124");
+        assert_eq!(
+            demangle_mangled_function_name("_M0L6_2atmpS9127"),
+            "*tmp/9127"
+        );
+        assert_eq!(demangle_mangled_function_name("_M0FP03foo"), "foo");
+    }
+
+    #[test]
+    fn demangle_name_mangling_reference_type_args() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp3zipGisE"),
+            "@myapp.zip[Int, String]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp8try__mapGiEHRP15myapp7MyError"),
+            "@myapp.try_map[Int] raise @myapp.MyError"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5applyGWiEsE"),
+            "@myapp.apply[(Int) -> String]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp3runGVWiEsE"),
+            "@myapp.run[async (Int) -> String]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp8try__runGWiEsQRP15myapp7MyErrorE"),
+            "@myapp.try_run[(Int) -> String raise @myapp.MyError]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name(
+                "_M0FP15myapp7complexGARP311moonbitlang4core4list4ListGiEE"
+            ),
+            "@myapp.complex[FixedArray[@moonbitlang/core/list.List[Int]]]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0EP311moonbitlang4core7builtin3IntP15myapp6double"),
+            "@myapp.Int::double"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP28my_2dorg8my_2dlib3foo"),
+            "@my-org/my-lib.foo"
+        );
+    }
+
+    #[test]
+    fn demangle_generated_native_symbol_samples() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP29moonbuild20demangle__standalone8demangle"),
+            "@moonbuild/demangle_standalone.demangle"
+        );
+        assert_eq!(
+            demangle_mangled_function_name(
+                "_M0FP29moonbuild36demangle__standalone__blackbox__test57____test__64656d616e676c655f746573742e6d6274__4_2edyncall$closure.data"
+            ),
+            "@moonbuild/demangle_standalone_blackbox_test.__test_64656d616e676c655f746573742e6d6274_4.dyncall"
+        );
+        assert_eq!(
+            demangle_mangled_function_name(
+                "_M0FP0119moonbitlang_2fcore_2fbuiltin_2fStringBuilder_2eas___40moonbitlang_2fcore_2fbuiltin_2eLogger_2estatic__method__table__id$object.data"
+            ),
+            "moonbitlang/core/builtin/StringBuilder.as_@moonbitlang/core/builtin.Logger.static_method_table_id"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0IPB13StringBuilderPB6Logger13write__string"),
+            "impl @moonbitlang/core/builtin.Logger for @moonbitlang/core/builtin.StringBuilder with write_string"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0L10local__endS895.$1"),
+            "local_end/895"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0L10_2ax__5464S11.$0"),
+            "*x_5464/11"
+        );
+        assert_eq!(
+            demangle_mangled_function_name(
+                "_M0L61_24username_2fhello_2fmain_2eabort__via__closure_2einner_2efnS271"
+            ),
+            "@username/hello/main.abort_via_closure.inner/271"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FPB30output_2eflush__segment_7c4024"),
+            "@moonbitlang/core/builtin.output.flush_segment|4024"
+        );
+    }
+
+    #[test]
+    fn demangle_additional_edge_cases() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp3fooHRP15myapp7MyError"),
+            "@myapp.foo raise @myapp.MyError"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0MP04Type3bar"),
+            "Type::bar"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0MP04Type3barN5innerS7"),
+            "Type::bar.inner[stamp=7]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg3fooN5innerS1GiEC2"),
+            "@pkg.foo.inner[stamp=1][Int].anonymous[uuid=2]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg3foo$closure.data"),
+            "@pkg.foo"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg3foo@123"),
+            "@pkg.foo"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg3foo."),
+            "@pkg.foo"
+        );
+    }
+
+    #[test]
+    fn demangle_empty_packages() {
+        assert_eq!(demangle_mangled_function_name("_M0FP03foo"), "foo");
+        assert_eq!(
+            demangle_mangled_function_name("_M0MP04Type3run"),
+            "Type::run"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0IP04ImplP05Trait3run"),
+            "impl Trait for Impl with run"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0EPB3IntP06double"),
+            "Int::double"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP03fooGRP04TypeE"),
+            "foo[Type]"
+        );
+    }
+
+    #[test]
+    fn demangle_all_type_argument_forms() {
+        assert_eq!(demangle_mangled_function_name("_M0FP03fooGvE"), "foo[V128]");
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP03fooGNiE"),
+            "foo[ReadOnlyArray[Int]]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP03fooGXWiEsE"),
+            "foo[FuncRef[(Int) -> String]]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP03fooGVXWiEsE"),
+            "foo[FuncRef[async (Int) -> String]]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP03fooGVNWiEsQiE"),
+            "foo[async (Int) -> String raise Int + nocancel]"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP03fooGVNXWiEsE"),
+            "foo[FuncRef[async (Int) -> String nocancel]]"
+        );
+    }
+
+    #[test]
+    fn demangle_utf8_identifier() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP09_e4_b8_ad"),
+            "\u{4e2d}"
+        );
+    }
+
+    #[test]
+    fn demangle_generated_receiver_type() {
+        assert_eq!(
+            demangle_mangled_function_name("_M0MP05outerL5Local3run"),
+            "outer.Local::run"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0EP05outerL5LocalP03run"),
+            "outer.Local::run"
+        );
+    }
+
+    #[test]
+    fn keeps_original_for_non_or_invalid_mangled_names() {
+        assert_eq!(demangle_mangled_function_name("plain"), "plain");
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP13pkg3foox"),
+            "_M0FP13pkg3foox"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0X13pkg3foo"),
+            "_M0X13pkg3foo"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0TP13pkg4Type"),
+            "_M0TP13pkg4Type"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("$_M0FP13pkg3foo"),
+            "@pkg.foo"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp7try_mapGiE"),
+            "_M0FP15myapp7try_mapGiE"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5outerCu245"),
+            "_M0FP15myapp5outerCu245"
+        );
+        assert_eq!(
+            demangle_mangled_function_name("_M0FP15myapp5outerC245l10c1_l10c2"),
+            "_M0FP15myapp5outerC245l10c1_l10c2"
+        );
+        assert_eq!(
+            demangle_mangled_function_name(
+                "_M0FP314d_2dh24moonbit_2dscatter_2dplot14scatter_2dplot28gen__scatter__plot__graphics"
+            ),
+            "_M0FP314d_2dh24moonbit_2dscatter_2dplot14scatter_2dplot28gen__scatter__plot__graphics"
+        );
+    }
+}
