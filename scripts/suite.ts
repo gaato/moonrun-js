@@ -2,10 +2,11 @@
 // real moonrun and once with moonrun-js, recording every runner invocation through
 // scripts/record-shim, then compares invocations byte for byte.
 //
-//   node scripts/suite.ts <async|core|x|path> [--target wasm|wasm-gc] [-p <pkg>]... [--refresh-ref]
+//   node scripts/suite.ts <async|core|x|path> [--target wasm|wasm-gc] [-p <pkg>]... [--refresh-ref] [--unordered]
 //
 // Reports go to .cache/reports/<suite>-<target>.json.
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -39,6 +40,8 @@ const option = (name: string): string | undefined => {
 const target = option('--target') ?? 'wasm';
 const packages = argv.flatMap((a, i) => (a === '-p' ? [argv[i + 1] ?? ''] : []));
 const refreshRef = argv.includes('--refresh-ref');
+// D12: concurrent async tests finish in timing order, even under the real moonrun.
+const unordered = argv.includes('--unordered');
 
 function checkout(): string {
   const dir = path.join(cache, 'upstream', suite ?? '');
@@ -121,8 +124,29 @@ function firstDifference(a: string, b: string): string {
   return '';
 }
 
+/** Test-protocol blocks sorted, other output kept in order (for `--unordered`, D12). */
+function sortedResultBlocks(stdout: string): string {
+  const blocks: string[] = [];
+  const rest = stdout.replace(
+    /----- BEGIN MOON TEST RESULT -----\n[\s\S]*?\n----- END MOON TEST RESULT -----\n/g,
+    (block) => {
+      blocks.push(block);
+      return '';
+    },
+  );
+  return `${rest}\0${blocks.sort().join('')}`;
+}
+
 const project = checkout();
-const key = `${path.basename(project)}-${target}${packages.length > 0 ? `-${packages.join('+').replaceAll('/', '_')}` : ''}`;
+const packageKey = packages.join('+').replaceAll('/', '_');
+// Long package lists would exceed the file-name limit; hash them.
+const packagePart =
+  packageKey.length === 0
+    ? ''
+    : packageKey.length <= 80
+      ? `-${packageKey}`
+      : `-${createHash('sha256').update(packageKey).digest('hex').slice(0, 16)}`;
+const key = `${path.basename(project)}-${target}${packagePart}`;
 const refDir = path.join(cache, 'records', `${key}.ref`);
 const jsDir = path.join(cache, 'records', `${key}.js`);
 if (refreshRef || !existsSync(refDir)) {
@@ -144,7 +168,11 @@ for (const [k, r] of ref) {
     continue;
   }
   for (const field of ['exit', 'stdout', 'stderr'] as const) {
-    if (r[field] !== j[field]) {
+    const same =
+      field === 'stdout' && unordered
+        ? sortedResultBlocks(r.stdout) === sortedResultBlocks(j.stdout)
+        : r[field] === j[field];
+    if (!same) {
       const detail =
         field === 'exit'
           ? `${r.exit} != ${j.exit}`
