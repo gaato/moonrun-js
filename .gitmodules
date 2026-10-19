@@ -1,0 +1,8 @@
+[submodule "upstream/moon"]
+	path = upstream/moon
+	url = https://github.com/moonbitlang/moon
+	shallow = true
+[submodule "upstream/async"]
+	path = upstream/async
+	url = https://github.com/moonbitlang/async.git
+	shallow = true
