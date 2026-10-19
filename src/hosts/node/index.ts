@@ -33,6 +33,6 @@ export function nodeHost(options: NodeHostOptions = {}): Host {
       },
     },
     fs: nodeFs(),
-    platform: { currentExe: options.currentExe },
+    platform: { currentExe: options.currentExe, pid: process.pid },
   };
 }

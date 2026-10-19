@@ -17,4 +17,6 @@ export interface Host {
 export interface HostPlatform {
   /** Absolute path of the running wasm file, when it came from a file. */
   readonly currentExe: string | undefined;
+  /** Process id shown where moonrun prints OS thread or process ids. */
+  readonly pid: number;
 }

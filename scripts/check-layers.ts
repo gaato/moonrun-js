@@ -4,12 +4,23 @@ import { readdirSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..', 'src');
-const RANK: Record<string, number> = { ports: 0, kernel: 1, domains: 2, abi: 3, engine: 4, hosts: 5 };
+const RANK: Record<string, number> = {
+  ports: 0,
+  kernel: 1,
+  domains: 2,
+  abi: 3,
+  engine: 4,
+  hosts: 5,
+};
 const LEAVES = new Set(['diagnostics', 'generated', 'types']);
 
 function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? files(path.join(dir, e.name)) : e.name.endsWith('.ts') ? [path.join(dir, e.name)] : [],
+    e.isDirectory()
+      ? files(path.join(dir, e.name))
+      : e.name.endsWith('.ts')
+        ? [path.join(dir, e.name)]
+        : [],
   );
 }
 
@@ -35,7 +46,8 @@ for (const file of files(root)) {
     }
     const a = RANK[from];
     const b = RANK[to];
-    const allowed = from === 'hosts' ? to !== '' : a !== undefined && b !== undefined && b < a && to !== 'hosts';
+    const allowed =
+      from === 'hosts' ? to !== '' : a !== undefined && b !== undefined && b < a && to !== 'hosts';
     if (from === '' && to === 'hosts') {
       problems.push(`${path.relative(root, file)}: the core entry must not import hosts`);
     } else if (!allowed && from !== '' && to !== '') {

@@ -36,6 +36,41 @@ function kindOf(stat: fs.Stats): FileKind {
         : 'other';
 }
 
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Names in directory order (not sorted, like Rust's `read_dir`); entries whose names are not
+ * UTF-8 are skipped. Names are read as latin1 to keep the raw bytes.
+ */
+function readDirNames(dir: string): string[] {
+  const names: string[] = [];
+  const handle = fs.opendirSync(dir, { encoding: 'latin1' });
+  try {
+    for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+      try {
+        names.push(utf8.decode(Buffer.from(entry.name, 'latin1')));
+      } catch {
+        // Not UTF-8: Rust's `to_str()` filters these out.
+      }
+    }
+  } finally {
+    handle.closeSync();
+  }
+  return names;
+}
+
+/** Like Rust `remove_dir_all`: a symlink is unlinked, anything else must be a directory. */
+function removeDirAll(target: string): void {
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink()) {
+    fs.unlinkSync(target);
+  } else if (stat.isDirectory()) {
+    fs.rmSync(target, { recursive: true });
+  } else {
+    throw Object.assign(new Error('ENOTDIR: not a directory'), { code: 'ENOTDIR' });
+  }
+}
+
 export function nodeFs(cwd: string = process.cwd()): FsPort {
   const resolve = (p: string): string => path.resolve(cwd, p);
   return {
@@ -47,9 +82,9 @@ export function nodeFs(cwd: string = process.cwd()): FsPort {
       attempt(() => {
         fs.mkdirSync(resolve(p), { recursive: true });
       }),
-    readDir: (p) => attempt(() => fs.readdirSync(resolve(p))),
+    readDir: (p) => attempt(() => readDirNames(resolve(p))),
     removeFile: (p) => attempt(() => fs.unlinkSync(resolve(p))),
-    removeDirAll: (p) => attempt(() => fs.rmSync(resolve(p), { recursive: true })),
+    removeDirAll: (p) => attempt(() => removeDirAll(resolve(p))),
     kind: (p) => attempt(() => kindOf(fs.statSync(resolve(p)))),
   };
 }

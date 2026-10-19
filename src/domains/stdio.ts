@@ -42,6 +42,12 @@ export class Stdio {
     this.writeStderr(encoder.encode(text));
   }
 
+  /** Drops buffered stdout, as a Rust abort does to its line-buffered stdout. */
+  discardStdout(): void {
+    this.#pending = [];
+    this.#pendingBytes = 0;
+  }
+
   flushStdout(): void {
     this.#flushThroughLastNewline(true);
   }
