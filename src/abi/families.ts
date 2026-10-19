@@ -7,6 +7,7 @@ import { consoleLog, moonbit, spectest } from './legacy/print.ts';
 import { rand } from './legacy/rand.ts';
 import { sys } from './legacy/sys.ts';
 import { time } from './legacy/time.ts';
+import { preview1 } from './wasi/preview1.ts';
 
 /** Every wasm import module moonrun provides, keyed by module name. */
 export const FAMILIES: Readonly<Record<string, ImportFamily>> = {
@@ -20,4 +21,5 @@ export const FAMILIES: Readonly<Record<string, ImportFamily>> = {
   __moonbit_fs_unstable: fsUnstable,
   exception,
   'ffi-bytes': ffiBytes,
+  wasi_snapshot_preview1: preview1,
 };

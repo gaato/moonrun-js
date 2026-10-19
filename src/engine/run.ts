@@ -71,6 +71,7 @@ export async function run(
 ): Promise<RunOutcome> {
   const stdio = new Stdio(host.stdio);
   const termination = new TerminationCell();
+  const cleanups: (() => void)[] = [];
   const ctx: RunContext = {
     host,
     stdio,
@@ -79,6 +80,9 @@ export async function run(
     termination,
     moduleName: loaded.name,
     args: options.args,
+    onTeardown: (cleanup) => {
+      cleanups.push(cleanup);
+    },
   };
   const noStackTrace = options.noStackTrace ?? false;
 
@@ -195,6 +199,9 @@ export async function run(
     return finish(await call(start, []), undefined);
   } finally {
     stdio.flushStdout();
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
   }
 }
 

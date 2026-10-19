@@ -14,6 +14,8 @@ export interface RunContext {
   /** argv[0]: the wasm path exactly as given. */
   readonly moduleName: string;
   readonly args: readonly string[];
+  /** Registers a cleanup (e.g. closing host fds) that runs once when the run ends. */
+  onTeardown(cleanup: () => void): void;
 }
 
 /** A family builds the imports of one wasm import module for a run. */

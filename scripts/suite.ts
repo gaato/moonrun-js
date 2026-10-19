@@ -126,7 +126,10 @@ const key = `${path.basename(project)}-${target}${packages.length > 0 ? `-${pack
 const refDir = path.join(cache, 'records', `${key}.ref`);
 const jsDir = path.join(cache, 'records', `${key}.js`);
 if (refreshRef || !existsSync(refDir)) {
-  record(project, 'moonrun', refDir, path.join(cache, 'build', key, 'ref'));
+  // The toolchain binary, not ~/.moon/bin/moonrun: the moonup shim adds variables to the child env.
+  const reference =
+    process.env['MOONRUN_REFERENCE'] ?? path.join(home, '.moonup/toolchains/latest/bin/moonrun');
+  record(project, reference, refDir, path.join(cache, 'build', key, 'ref'));
 }
 // A separate target dir keeps moon from reusing cached test results of the other runner.
 record(project, path.join(repoRoot, 'bin/moonrun-js'), jsDir, path.join(cache, 'build', key, 'js'));

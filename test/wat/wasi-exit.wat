@@ -1,0 +1,68 @@
+;; Writes to stdout (no newline) and stderr, then proc_exit(argv[1] as a signed decimal).
+(module
+  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "args_get" (func $args_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 1024) "bye")
+  (data (i32.const 1088) "err")
+
+  (func $write (param $ptr i32) (param $len i32)
+    (i32.store (i32.const 0) (local.get $ptr))
+    (i32.store (i32.const 4) (local.get $len))
+    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8))))
+  (func $num (param $n i32)
+    (local $p i32) (local $u i32) (local $neg i32)
+    (i32.store8 (i32.const 47) (i32.const 10))
+    (local.set $p (i32.const 47))
+    (local.set $neg (i32.lt_s (local.get $n) (i32.const 0)))
+    (local.set $u (select (i32.sub (i32.const 0) (local.get $n)) (local.get $n) (local.get $neg)))
+    (loop $l
+      (local.set $p (i32.sub (local.get $p) (i32.const 1)))
+      (i32.store8 (local.get $p) (i32.add (i32.const 48) (i32.rem_u (local.get $u) (i32.const 10))))
+      (local.set $u (i32.div_u (local.get $u) (i32.const 10)))
+      (br_if $l (local.get $u)))
+    (if (local.get $neg) (then
+      (local.set $p (i32.sub (local.get $p) (i32.const 1)))
+      (i32.store8 (local.get $p) (i32.const 45))))
+    (call $write (local.get $p) (i32.sub (i32.const 48) (local.get $p))))
+  ;; Prints a NUL-terminated string and a newline.
+  (func $cstr (param $ptr i32)
+    (local $end i32)
+    (local.set $end (local.get $ptr))
+    (block $done (loop $l
+      (br_if $done (i32.eqz (i32.load8_u (local.get $end))))
+      (local.set $end (i32.add (local.get $end) (i32.const 1)))
+      (br $l)))
+    (call $write (local.get $ptr) (i32.sub (local.get $end) (local.get $ptr)))
+    (i32.store8 (i32.const 48) (i32.const 10))
+    (call $write (i32.const 48) (i32.const 1)))
+  ;; Prints `count` strings from a pointer table.
+  (func $table (param $ptrs i32) (param $count i32)
+    (local $i i32)
+    (block $done (loop $l
+      (br_if $done (i32.ge_u (local.get $i) (local.get $count)))
+      (call $cstr (i32.load (i32.add (local.get $ptrs) (i32.mul (local.get $i) (i32.const 4)))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $l))))
+  (func $atoi (param $p i32) (result i32)
+    (local $n i32) (local $neg i32) (local $c i32)
+    (if (i32.eq (i32.load8_u (local.get $p)) (i32.const 45)) (then
+      (local.set $neg (i32.const 1))
+      (local.set $p (i32.add (local.get $p) (i32.const 1)))))
+    (block $done (loop $l
+      (local.set $c (i32.load8_u (local.get $p)))
+      (br_if $done (i32.eqz (local.get $c)))
+      (local.set $n (i32.add (i32.mul (local.get $n) (i32.const 10)) (i32.sub (local.get $c) (i32.const 48))))
+      (local.set $p (i32.add (local.get $p) (i32.const 1)))
+      (br $l)))
+    (select (i32.sub (i32.const 0) (local.get $n)) (local.get $n) (local.get $neg)))
+
+  (func (export "_start")
+    (drop (call $args_get (i32.const 8192) (i32.const 9216)))
+    (call $write (i32.const 1024) (i32.const 3))
+    (i32.store (i32.const 128) (i32.const 1088))
+    (i32.store (i32.const 132) (i32.const 3))
+    (drop (call $fd_write (i32.const 2) (i32.const 128) (i32.const 1) (i32.const 136)))
+    (call $proc_exit (call $atoi (i32.load (i32.const 8196))))
+    (unreachable)))

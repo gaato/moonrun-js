@@ -3,6 +3,8 @@ import type { StdioPort } from '../ports/stdio.ts';
 const encoder = new TextEncoder();
 const NEWLINE = 0x0a;
 const MAX_BUFFERED = 8192;
+/** Rust's `STDIN_BUF_SIZE`. */
+const STDIN_CAPACITY = 8192;
 
 /**
  * Guest-facing standard streams. Stdout behaves like Rust's line-buffered
@@ -12,6 +14,9 @@ export class Stdio {
   readonly #port: StdioPort;
   #pending: Uint8Array[] = [];
   #pendingBytes = 0;
+  readonly #stdinBuffer = new Uint8Array(STDIN_CAPACITY);
+  #stdinPos = 0;
+  #stdinEnd = 0;
 
   constructor(port: StdioPort) {
     this.#port = port;
@@ -52,8 +57,23 @@ export class Stdio {
     this.#flushThroughLastNewline(true);
   }
 
+  /**
+   * One read with the semantics of Rust's `BufReader` around stdin: a request is
+   * served from buffered bytes alone when there are any, and only reads the port
+   * directly when the buffer is empty and the request is at least its capacity.
+   */
   readStdin(buffer: Uint8Array): number {
-    return this.#port.readStdin(buffer);
+    if (this.#stdinPos === this.#stdinEnd && buffer.length >= STDIN_CAPACITY) {
+      return this.#port.readStdin(buffer);
+    }
+    if (this.#stdinPos === this.#stdinEnd) {
+      this.#stdinPos = 0;
+      this.#stdinEnd = this.#port.readStdin(this.#stdinBuffer);
+    }
+    const n = Math.min(buffer.length, this.#stdinEnd - this.#stdinPos);
+    buffer.set(this.#stdinBuffer.subarray(this.#stdinPos, this.#stdinPos + n));
+    this.#stdinPos += n;
+    return n;
   }
 
   #flushThroughLastNewline(all: boolean): void {
