@@ -1,5 +1,6 @@
 # moonrun-js
 
+[![npm](https://img.shields.io/npm/v/moonrun-js)](https://www.npmjs.com/package/moonrun-js)
 [![CI](https://github.com/gaato/moonrun-js/actions/workflows/ci.yml/badge.svg)](https://github.com/gaato/moonrun-js/actions/workflows/ci.yml)
 [![compat: moonrun 0.1.20261012](https://img.shields.io/badge/compat-moonrun%200.1.20261012-blue)](docs/divergences.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gaato/moonrun-js)
