@@ -26,7 +26,7 @@ export function formatErrorChain(chain: readonly string[]): string {
 function indent(text: string, first: string, rest: string = first): string {
   return text
     .split('\n')
-    .map((line, i) => (i === 0 ? first + line : line.length === 0 ? line : rest + line))
+    .map((line, i) => (i === 0 ? first + line : rest + line))
     .join('\n');
 }
 
