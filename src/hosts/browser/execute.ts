@@ -1,5 +1,5 @@
 import type { RunOutcome } from '../../engine/run.ts';
-import { type BrowserHostOptions, createBrowserHost } from './host.ts';
+import { type BrowserHostOptions, type BrowserSignalOptions, createBrowserHost } from './host.ts';
 import type { CommandContext, ResolveCommand } from './process.ts';
 import type { BrowserStdin } from './streams.ts';
 
@@ -16,6 +16,7 @@ export type WorkerReply =
   | { readonly type: 'stdout' | 'stderr'; readonly bytes: Uint8Array }
   | { readonly type: 'outcome'; readonly outcome: RunOutcome }
   | { readonly type: 'input-ack'; readonly id: number }
+  | { readonly type: 'signal-ack'; readonly id: number; readonly delivered: boolean }
   | {
       readonly type: 'resolve';
       readonly id: number;
@@ -27,7 +28,12 @@ export type WorkerMessage =
   | { readonly type: 'run'; readonly request: BrowserRunRequest }
   | { readonly type: 'input'; readonly id: number; readonly bytes: Uint8Array }
   | { readonly type: 'input-end' }
-  | { readonly type: 'signal'; readonly signal: number }
+  | {
+      readonly type: 'signal';
+      readonly signal: number;
+      readonly target?: 'children';
+      readonly id?: number;
+    }
   | {
       readonly type: 'resolved';
       readonly id: number;
@@ -42,7 +48,7 @@ export async function executeBrowserRun(
   capabilities: {
     readonly stdin?: BrowserStdin;
     readonly resolveCommand?: ResolveCommand;
-    readonly ready?: (signal: (signal: number) => void) => void;
+    readonly ready?: (signal: (signal: number, options?: BrowserSignalOptions) => boolean) => void;
   } = {},
 ): Promise<void> {
   let outcome: RunOutcome;
@@ -56,7 +62,11 @@ export async function executeBrowserRun(
       stdout: (bytes) => send({ type: 'stdout', bytes }),
       stderr: (bytes) => send({ type: 'stderr', bytes }),
     });
-    capabilities.ready?.((signal) => host.signal(signal));
+    capabilities.ready?.((signal, options) => {
+      if (options !== undefined) return host.signal(signal, options);
+      host.signal(signal);
+      return true;
+    });
     outcome = await host.run(request.wasm, {
       name: request.name ?? '/work/program.wasm',
       args: request.args ?? [],

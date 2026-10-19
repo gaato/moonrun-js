@@ -4,6 +4,7 @@ import {
   type WorkerMessage,
   type WorkerReply,
 } from './execute.ts';
+import type { BrowserSignalOptions } from './host.ts';
 import { BrowserStdin } from './streams.ts';
 
 const scope = globalThis as unknown as {
@@ -17,8 +18,15 @@ const pending = new Map<
 >();
 let nextRequest = 0;
 let started = false;
-let deliver: ((signal: number) => void) | undefined;
-const signals: number[] = [];
+let deliver: ((signal: number, options?: BrowserSignalOptions) => boolean) | undefined;
+const signals: Extract<WorkerMessage, { type: 'signal' }>[] = [];
+function signal(request: Extract<WorkerMessage, { type: 'signal' }>): void {
+  const delivered =
+    deliver?.(request.signal, request.target === 'children' ? { target: 'children' } : undefined) ??
+    false;
+  if (request.id !== undefined)
+    scope.postMessage({ type: 'signal-ack', id: request.id, delivered });
+}
 function start(request: BrowserRunRequest): void {
   void executeBrowserRun(request, (reply) => scope.postMessage(reply), {
     ...(request.streaming === true ? { stdin } : {}),
@@ -35,8 +43,8 @@ function start(request: BrowserRunRequest): void {
             }),
         }
       : {}),
-    ready: (signal) => {
-      deliver = signal;
+    ready: (dispatch) => {
+      deliver = dispatch;
       for (const s of signals.splice(0)) signal(s);
     },
   });
@@ -59,8 +67,8 @@ scope.onmessage = ({ data }) => {
       stdin.end();
       break;
     case 'signal':
-      if (deliver === undefined) signals.push(data.signal);
-      else deliver(data.signal);
+      if (deliver === undefined) signals.push(data);
+      else signal(data);
       break;
     case 'resolved': {
       const callback = pending.get(data.id);

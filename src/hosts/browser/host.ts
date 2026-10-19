@@ -26,14 +26,18 @@ export interface BrowserHostOptions {
   /** DER roots for TrustSystemRoot. By default fetch the relay's /roots endpoint, or use none. */
   readonly roots?: readonly Uint8Array[];
 }
+export interface BrowserSignalOptions {
+  readonly target: 'children';
+}
 export interface BrowserHost extends Host {
   readonly diagnostics: Diagnostics;
   run(
     wasm: Uint8Array | WebAssembly.Module,
     options?: { readonly name?: string; readonly args?: readonly string[] },
   ): Promise<RunOutcome>;
-  /** Deliver to this Run; the shell's cancellation handlers manage its foreground process. */
+  /** Deliver to the top Run by default, or use the process kill path for its live descendants. */
   signal(signal: number): void;
+  signal(signal: number, options: BrowserSignalOptions): boolean;
 }
 async function compile(url: URL): Promise<WebAssembly.Module> {
   const response = await fetch(url);
@@ -64,6 +68,7 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
   ]);
   const vfs = new MemoryVfs(options.files, options.cwd);
   const tree = { controls: new Map<number, BrowserControl>(), closed: false };
+  const rootPid = allocatePid();
   const source = options.stdin;
   let offset = 0;
   const read = (buffer: Uint8Array): number => {
@@ -128,7 +133,7 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
           }
         }
       },
-      signal: (signal) => control.send(signal),
+      signal,
       stdio: {
         writeStdout: (b) => {
           io.stdout.write(b);
@@ -137,7 +142,7 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
           io.stderr.write(b);
         },
         readStdin: (b) => io.stdin.read(b),
-        readStdinAsync: async (b) => io.stdin.readAsync(b, control.abort.signal),
+        readStdinAsync: async (b) => control.readStdin(io.stdin, b),
       },
       env: {
         get: (k) => env.get(k),
@@ -192,10 +197,23 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
       child: (request: SpawnRequest, streams: BrowserIo, next: BrowserControl, childPid: number) =>
         make(streams, request.cwd ?? cwd, childEnvironment(request.env), next, childPid, true),
     });
+    function signal(s: number): void;
+    function signal(s: number, options: BrowserSignalOptions): boolean;
+    function signal(s: number, options?: BrowserSignalOptions): boolean | undefined {
+      if (options?.target !== 'children') {
+        control.send(s);
+        return;
+      }
+      let delivered = false;
+      for (const [key, active] of tree.controls) {
+        if (key !== rootPid && !active.abort.signal.aborted && port.kill(key, s).ok)
+          delivered = true;
+      }
+      return delivered;
+    }
     return host;
   };
   const control = new BrowserControl();
-  const pid = allocatePid();
-  tree.controls.set(pid, control);
-  return make(rootIo, options.cwd ?? '/work', options.env ?? {}, control, pid, false);
+  tree.controls.set(rootPid, control);
+  return make(rootIo, options.cwd ?? '/work', options.env ?? {}, control, rootPid, false);
 }

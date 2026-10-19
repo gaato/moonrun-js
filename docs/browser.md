@@ -159,10 +159,33 @@ but use `host.run` for this extension's signal/lifetime handling.
 `running.signal(2)` (or `host.signal(2)`) delivers SIGINT to the top Run's existing signal
 capture/cancellation machinery. A shell's process cancellation stops its foreground
 child through the existing process jobs; in cli/sh 0.2.1 this ends the shell Run with
-signal 2 too. This is **not** terminal job control: SignalPort has no foreground process
-group, tty or job-selection operation, so a generic helper cannot send Ctrl-C only to an
-arbitrary foreground pipeline while keeping its shell alive. Lower-level embedders with
-a known child pid can use `host.process.kill(pid, signal)` (1/2/9/15; 0 probes existence).
+signal 2 too. The default call still returns `void`.
+
+For a browser terminal that should keep its shell alive, target the commands instead:
+
+```ts
+const delivered = await running.signal(2, { target: 'children' });
+// false means no live child accepted the signal; the top Run is never signaled here.
+```
+
+This returns a `Promise<boolean>` acknowledged by the Worker. It uses the existing
+`process.kill` path for **all live wasm descendants** started through `resolveCommand`,
+including nested shells and their commands, and excludes the top Run. `true` means at
+least one child accepted the signal, not that it has finished. With no live children,
+or after the Run ends, it resolves to `false`. Commands still being resolved and future
+children are not included. This is a broadcast to the run's children, including any
+background commands, rather than POSIX foreground process-group/tty job selection.
+
+The lower-level `host.signal(2, {target: 'children'})` returns the same boolean
+synchronously. A known child pid can also be signaled with `host.process.kill(pid, signal)`.
+Both paths accept 1/2/9/15 (0 probes existence); unsupported/invalid signals are not
+delivered by the children broadcast. Captured signals use the child's cancellation
+handlers. Virtual signals interrupt pending streaming stdin reads with EINTR so these
+handlers can finish, while leaving the shared input open for the shell's next command.
+A child terminated by SIGINT produces `{kind: 'signaled', signal: 2}`, which the existing
+kernel exposes as `-2`; cli/sh 0.2.1 turns that into `$? = 130`. The Worker handle's
+boolean acknowledgment does not replace the guest's normal wait/status machinery.
+
 Signals are cooperative at imports/suspension points; code that never yields or calls
 imports blocks the shared Worker and cannot be preempted by a message. Terminating the
 Worker externally stops the entire tree, rather than an individual wasm child.
@@ -220,8 +243,10 @@ guest args/env/stdio/exit, SQLite commits and reopen, and the real Worker entry 
 checks wasm/Worker assets. Chrome verification is left to the coordinator; no browser
 or persistent demo server is started as part of implementation verification.
 
-The shell tests download cli/sh and cli/tr 0.2.1 only into `.cache/browser-shell/` and
+The shell tests download cli/sh, cli/tr and cli/cat 0.2.1 only into `.cache/browser-shell/` and
 verify fixed SHA-256 digests on every use. Tests compare pipelines, missing-command
 messages/status, nested sh and interactive output with the Node CLI using native host
 commands. Additional tests cover large pipeline backpressure, cwd/env/file redirection,
 merged output, precompiled children, traps/compile failures, kill/wait and SIGINT.
+Children-only SIGINT tests cover a streaming cat, a cat pipeline, a nested shell, and the
+no-children case, checking status 130, the next interactive prompt and the next command.

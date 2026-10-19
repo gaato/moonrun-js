@@ -1,10 +1,16 @@
 import type { RunOutcome } from '../../engine/run.ts';
 import type { BrowserRunRequest, WorkerMessage, WorkerReply } from './execute.ts';
+import type { BrowserSignalOptions } from './host.ts';
 import type { ResolveCommand } from './process.ts';
 
 export type { RunOutcome } from '../../engine/run.ts';
 export type { BrowserRunRequest } from './execute.ts';
-export { type BrowserHost, type BrowserHostOptions, createBrowserHost } from './host.ts';
+export {
+  type BrowserHost,
+  type BrowserHostOptions,
+  type BrowserSignalOptions,
+  createBrowserHost,
+} from './host.ts';
 export type { CommandContext, ResolveCommand } from './process.ts';
 export { BrowserStdin } from './streams.ts';
 export type { BrowserFiles } from './vfs.ts';
@@ -31,13 +37,15 @@ export interface BrowserRunHandle extends Promise<RunOutcome> {
   write(bytes: Uint8Array): Promise<void>;
   end(): void;
   signal(signal: number): void;
+  signal(signal: number, options: BrowserSignalOptions): Promise<boolean>;
 }
 export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
   let write: BrowserRunHandle['write'] = async () => {
     throw new Error('Worker unavailable');
   };
   let end = (): void => {};
-  let signal = (_signal: number): void => {};
+  let signal = (_signal: number, options?: BrowserSignalOptions): void | Promise<boolean> =>
+    options === undefined ? undefined : Promise.resolve(false);
   const promise = new Promise<RunOutcome>((resolve, reject) => {
     const worker = new web.Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
     let done = false;
@@ -45,11 +53,14 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
     let id = 0;
     let writeTail = Promise.resolve();
     const inputs = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+    const signals = new Map<number, (delivered: boolean) => void>();
     const stop = (): void => {
       done = true;
       worker.terminate();
       for (const input of inputs.values()) input.reject(new Error('Run has ended'));
       inputs.clear();
+      for (const resolve of signals.values()) resolve(false);
+      signals.clear();
     };
     const finish = (outcome: RunOutcome): void => {
       if (!done) {
@@ -78,6 +89,10 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
           case 'input-ack':
             inputs.get(reply.id)?.resolve();
             inputs.delete(reply.id);
+            break;
+          case 'signal-ack':
+            signals.get(reply.id)?.(reply.delivered);
+            signals.delete(reply.id);
             break;
           case 'resolve': {
             void (async () => {
@@ -150,8 +165,22 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
         })
         .catch(failure);
     };
-    signal = (s) => {
-      if (!done) worker.postMessage({ type: 'signal', signal: s });
+    signal = (s, options) => {
+      if (options?.target !== 'children') {
+        if (!done) worker.postMessage({ type: 'signal', signal: s });
+        return;
+      }
+      if (done) return Promise.resolve(false);
+      const key = ++id;
+      return new Promise<boolean>((resolve, reject) => {
+        signals.set(key, resolve);
+        try {
+          worker.postMessage({ type: 'signal', signal: s, target: 'children', id: key });
+        } catch (e) {
+          signals.delete(key);
+          reject(e);
+        }
+      });
     };
     const {
       stdout: _stdout,
@@ -174,9 +203,14 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
       failure(e);
     }
   });
+  function sendSignal(s: number): void;
+  function sendSignal(s: number, options: BrowserSignalOptions): Promise<boolean>;
+  function sendSignal(s: number, options?: BrowserSignalOptions): void | Promise<boolean> {
+    return signal(s, options);
+  }
   return Object.assign(promise, {
     write: (b: Uint8Array) => write(b),
     end: () => end(),
-    signal: (s: number) => signal(s),
+    signal: sendSignal,
   });
 }

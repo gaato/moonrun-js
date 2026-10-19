@@ -16,6 +16,7 @@ const nativeFetch = globalThis.fetch;
 const hashes: Readonly<Record<string, string>> = {
   sh: '362fa346d75afaa0744739b0fb29c158e2873487b5daa7b8ecedf2ff70d25153',
   tr: '9fbddcf123bd6b5c6b37c01686ab8b7c9b2769d974b3a7be2b589a213f0debf7',
+  cat: '0077933f172648eee22f902f14c83ca6c732afda50d1a7c1c47163ec4e587374',
 };
 const modules = new Map<string, Uint8Array>();
 let scratch: string;
@@ -28,7 +29,7 @@ const assets: Readonly<Record<string, string>> = {
 beforeAll(async () => {
   await mkdir(cache, { recursive: true });
   scratch = await mkdtemp(new URL('tests-', cache).pathname);
-  for (const name of ['sh', 'tr']) {
+  for (const name of ['sh', 'tr', 'cat']) {
     const file = new URL(`${name}.wasm`, cache);
     let bytes: Uint8Array;
     try {
@@ -218,12 +219,12 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
     );
     expect(actual.stdout.length).toBe(input.length);
   }, 15000);
-  it('publishes increasing pids and kill/wait completion, including a suspended stdin read', async () => {
+  it('publishes increasing pids and SIGINT/SIGKILL wait completion with suspended I/O', async () => {
     stubAssets();
     const host = await createBrowserHost({ resolveCommand: async (name) => modules.get(name) });
     const request = {
-      program: 'tr',
-      argv: ['tr', 'a-z', 'A-Z'],
+      program: 'cat',
+      argv: ['cat'],
       env: [],
       cwd: undefined,
       stdio: [{ kind: 'pipe' }, { kind: 'pipe' }, { kind: 'pipe' }] as const,
@@ -235,8 +236,14 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
         const result = await host.process.spawn(request);
         if (!result.ok) throw new Error(result.error.code);
         children.push(result.value);
-        if (i === 0) result.value.stdout?.onData(() => {});
-        else {
+        if (i === 0) {
+          let received = false;
+          result.value.stdout?.onData(() => {
+            received = true;
+          });
+          expect(result.value.stdin?.write(new TextEncoder().encode('ready\n'))).toBe(true);
+          await until(() => received);
+        } else {
           let received = false;
           result.value.stdout?.onData(() => {
             received = true;
@@ -248,12 +255,12 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
         result.value.stderr?.onData(() => {});
       }
       expect(children[1]?.pid).toBeGreaterThan(children[0]?.pid ?? 0);
-      for (const child of children) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
+      for (const [index, child] of children.entries()) {
+        const signal = index === 0 ? 2 : 9;
         expect(host.process.kill(child.pid, 0).ok).toBe(true);
         const exited = new Promise((resolve) => child.onExit(resolve));
-        expect(host.process.kill(child.pid, 9).ok).toBe(true);
-        expect(await exited).toEqual({ kind: 'signaled', signal: 9 });
+        expect(host.process.kill(child.pid, signal).ok).toBe(true);
+        expect(await exited).toEqual({ kind: 'signaled', signal });
         expect(host.process.kill(child.pid, 0)).toEqual({ ok: false, error: { code: 'ESRCH' } });
       }
     } finally {
@@ -358,6 +365,70 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
     ).toEqual({ kind: 'completed' });
     expect(stdout).toBe('HELLO\n0\n');
     expect(stderr).toBe('');
+  });
+  for (const command of ['cat', 'cat | cat', "sh -c 'cat'"]) {
+    it(`interrupts all descendants of ${command} while keeping interactive sh alive`, async () => {
+      const close = bridge();
+      let stdout = '';
+      let stderr = '';
+      const handle = runInWorker({
+        wasm: bytes('sh'),
+        name: 'sh',
+        args: ['-i'],
+        stdin: 'stream',
+        resolveCommand: async (name) => modules.get(name),
+        stdout: (b) => {
+          stdout += new TextDecoder().decode(b);
+        },
+        stderr: (b) => {
+          stderr += new TextDecoder().decode(b);
+        },
+      });
+      const prompts = () => (stdout + stderr).match(/\$ /g)?.length ?? 0;
+      try {
+        await until(() => prompts() === 1);
+        await handle.write(new TextEncoder().encode(`${command}\n`));
+        await handle.write(new TextEncoder().encode('waiting\n'));
+        await until(() => stdout.includes('waiting\n'));
+        expect(await handle.signal(2, { target: 'children' })).toBe(true);
+        await until(() => prompts() === 2);
+        expect(await handle.signal(2, { target: 'children' })).toBe(false);
+        await handle.write(new TextEncoder().encode('echo $?; echo survived\n'));
+        await until(() => stdout.includes('130\nsurvived\n'));
+        await handle.write(new TextEncoder().encode('exit 7\n'));
+        handle.end();
+        expect(await handle).toEqual({ kind: 'exited', code: 7 });
+      } finally {
+        await close();
+      }
+    }, 15000);
+  }
+  it('reports no children before preparation, at an idle prompt and after the Worker ends', async () => {
+    const close = bridge();
+    let prompted = false;
+    const output = (b: Uint8Array) => {
+      if (new TextDecoder().decode(b).includes('$ ')) prompted = true;
+    };
+    const handle = runInWorker({
+      wasm: bytes('sh'),
+      name: 'sh',
+      args: ['-i'],
+      stdin: 'stream',
+      resolveCommand: async (name) => modules.get(name),
+      stdout: output,
+      stderr: output,
+    });
+    try {
+      expect(await handle.signal(2, { target: 'children' })).toBe(false);
+      await until(() => prompted);
+      expect(await handle.signal(2, { target: 'children' })).toBe(false);
+      await handle.write(new TextEncoder().encode('exit 0\n'));
+      handle.end();
+      expect(await handle).toEqual({ kind: 'completed' });
+      expect(await handle.signal(2, { target: 'children' })).toBe(false);
+    } finally {
+      await close();
+    }
   });
   it('signals a suspended Worker and ignores a late command-resolution result', async () => {
     const close = bridge();

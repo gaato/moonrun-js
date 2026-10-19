@@ -7,7 +7,7 @@ import type { Handle } from '../../kernel/handles.ts';
 import { Children, feedChild } from '../../kernel/process.ts';
 import { TerminationSignal } from '../../kernel/termination.ts';
 import type { BrowserHost } from './host.ts';
-import type { BrowserIo, ByteWriter } from './streams.ts';
+import type { BrowserIo, ByteReader, ByteWriter } from './streams.ts';
 
 /** Per-Run signal dispatch. Captured signals use the kernel; default action stops at suspension. */
 export class BrowserControl {
@@ -17,6 +17,7 @@ export class BrowserControl {
   readonly #aborted: Promise<number>;
   #abort: (signal: number) => void = () => {};
   #signal: number | undefined;
+  #stdin = new AbortController();
   constructor() {
     this.#aborted = new Promise((resolve) => {
       this.#abort = resolve;
@@ -39,19 +40,28 @@ export class BrowserControl {
     const captured = this.#captures.get(signal);
     if (signal !== 9 && captured !== undefined && captured.size > 0) {
       for (const handler of [...captured]) handler();
+      // Virtual signals must wake a streaming read too, so guest cancellation can finish.
+      // A separate controller leaves handled signals free to continue reading afterward.
+      this.#stdin.abort();
+      this.#stdin = new AbortController();
     } else this.stop(signal);
+  }
+  readStdin(reader: ByteReader, buffer: Uint8Array): Promise<number> {
+    return reader.readAsync(buffer, this.#stdin.signal);
   }
   stop(signal: number): void {
     if (this.#signal !== undefined) return;
     this.#signal = signal;
     for (const ctx of this.#contexts) ctx.termination.request({ kind: 'signal', signal });
     this.#abort(signal);
+    this.#stdin.abort();
     this.abort.abort();
   }
   termination(): RunOutcome | undefined {
     return this.#signal === undefined ? undefined : { kind: 'signaled', signal: this.#signal };
   }
   close(): void {
+    this.#stdin.abort();
     this.abort.abort();
   }
   async drain(pending: Promise<void>[]): Promise<void> {
