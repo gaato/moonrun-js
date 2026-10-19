@@ -2,7 +2,7 @@
 // real moonrun and once with moonrun-js, recording every runner invocation through
 // scripts/record-shim, then compares invocations byte for byte.
 //
-//   node scripts/suite.ts <async|core|x|path> [--target wasm|wasm-gc] [-p <pkg>]... [--refresh-ref] [--unordered]
+//   node scripts/suite.ts <async|core|x|path> [--target wasm|wasm-gc] [-p <pkg>]... [--refresh-ref] [--unordered] [--runtime node|deno|bun]
 //
 // Reports go to .cache/reports/<suite>-<target>.json.
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -42,6 +42,11 @@ const packages = argv.flatMap((a, i) => (a === '-p' ? [argv[i + 1] ?? ''] : []))
 const refreshRef = argv.includes('--refresh-ref');
 // D12: concurrent async tests finish in timing order, even under the real moonrun.
 const unordered = argv.includes('--unordered');
+const runtime = option('--runtime') ?? 'node';
+const jsRunner = path.join(
+  repoRoot,
+  runtime === 'node' ? 'bin/moonrun-js' : `bin/moonrun-js-${runtime}`,
+);
 
 function checkout(): string {
   const dir = path.join(cache, 'upstream', suite ?? '');
@@ -148,7 +153,7 @@ const packagePart =
       : `-${createHash('sha256').update(packageKey).digest('hex').slice(0, 16)}`;
 const key = `${path.basename(project)}-${target}${packagePart}`;
 const refDir = path.join(cache, 'records', `${key}.ref`);
-const jsDir = path.join(cache, 'records', `${key}.js`);
+const jsDir = path.join(cache, 'records', `${key}.${runtime}`);
 if (refreshRef || !existsSync(refDir)) {
   // The toolchain binary, not ~/.moon/bin/moonrun: the moonup shim adds variables to the child env.
   const reference =
@@ -156,7 +161,7 @@ if (refreshRef || !existsSync(refDir)) {
   record(project, reference, refDir, path.join(cache, 'build', key, 'ref'));
 }
 // A separate target dir keeps moon from reusing cached test results of the other runner.
-record(project, path.join(repoRoot, 'bin/moonrun-js'), jsDir, path.join(cache, 'build', key, 'js'));
+record(project, jsRunner, jsDir, path.join(cache, 'build', key, runtime));
 
 const ref = load(refDir);
 const js = load(jsDir);
@@ -187,7 +192,11 @@ for (const [k, j] of js) {
   }
 }
 mkdirSync(path.join(cache, 'reports'), { recursive: true });
-const reportPath = path.join(cache, 'reports', `${key}.json`);
+const reportPath = path.join(
+  cache,
+  'reports',
+  `${key}${runtime === 'node' ? '' : `.${runtime}`}.json`,
+);
 writeFileSync(reportPath, JSON.stringify({ invocations: ref.size, mismatches }, null, 2));
 const bad = new Set(mismatches.map((m) => JSON.stringify(m.argv))).size;
 console.log(
