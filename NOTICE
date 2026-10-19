@@ -5,3 +5,7 @@ This project reimplements moonrun from moon (https://github.com/moonbitlang/moon
 Copyright (C) 2026 International Digital Economy Academy, licensed under the
 Apache License, Version 2.0. Several modules are ports of moonrun and moonutil
 sources and keep their behavior; see the comments in each file.
+
+test/fixtures/tls/ contains test keys from moonbitlang/async
+(https://github.com/moonbitlang/async), licensed under the Apache License, Version 2.0.
+crates/tls-engine/ builds on rustls and ring; see their licenses in the crate sources.

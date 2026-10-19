@@ -437,7 +437,7 @@ function renderSymbol(symbol: Symbol): string {
         const typeUse = typeText.startsWith('@') ? typeText.slice(1) : typeText;
         text = `@${symbol.methodPkg}.${typeUse}`;
       }
-      return `${text}::${symbol.name}` + symbol.before + (symbol.typeArgs ?? '') + symbol.after;
+      return `${text}::${symbol.name}${symbol.before}${symbol.typeArgs ?? ''}${symbol.after}`;
     }
     case 'local': {
       const noDollar = symbol.ident.startsWith('$') ? symbol.ident.slice(1) : symbol.ident;

@@ -25,7 +25,8 @@
     "lint": "biome check . && oxlint --type-aware --deny-warnings src scripts test && node scripts/check-layers.ts",
     "format": "biome format --write .",
     "test": "vitest run",
-    "gen": "node scripts/gen-imports.ts"
+    "gen": "node scripts/gen-imports.ts",
+    "build:tls": "node scripts/build-tls.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

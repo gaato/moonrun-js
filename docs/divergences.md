@@ -23,3 +23,8 @@
 | D17 | inotify は Node の `fs.watch`（Linux では inotify）でエミュレートする。イベントは名前なし（`len` 0）で、マスクは代表値（ディレクトリのエントリ変化は `IN_CREATE`、ファイルの書き込みは `IN_MODIFY`）。`IN_MODIFY` と `IN_ATTRIB` は mtime の変化で見分け、ディレクトリ自身の移動・削除もエントリ変化として報告する。`IN_IGNORED` は `remove_file` のときだけ出し、削除による自動解除は報告しない。`IN_Q_OVERFLOW` は出さない。watch はパスの `O_PATH` fd を持つ。watch 登録時（または直前に報告した書き込み）と同じ mtime の刻みに入った書き込みは `IN_ATTRIB` と区別できず落ちる | `fs.watch` は `change`/`rename` の 2 種しか区別しない。ゲスト（`@fs.Watcher`）は wd・relevant・ignore・overflow しか読まず、変化した wd を再走査して差分を出すので、余分な再走査は結果を変えない |
 | D18 | `make_rename_job` の `replace=false`（`RENAME_NOREPLACE`）は移動先の `lstat` を見てから `rename` するので、その間に作られた移動先は置き換えられる | Node の `rename` にフラグが無い |
 | D19 | `make_readdir_job` は `/proc/self/fd/<fd>` を `opendir` して `linux_dirent64` に詰め直す。`.`・`..` を先頭に置き、`d_off` は通し番号、`d_ino` はエントリの `lstat`。`/proc` の無いホストでは `ENOENT`。開いたまま削除されたディレクトリは本家が 0（終端）を返すのに対し `ENOENT` になる | Node に fd からの `getdents64` が無い。エントリ順は同じ `getdents64` 由来 |
+| D20 | TLS は OpenSSL ではなく rustls で、`take_error` などのエラー文言が異なる。TLS 1.1 以下と再ネゴシエーションは非対応 | 同期で駆動でき、全ランタイムで動く TLS エンジンとして rustls を wasm で使うため |
+| D21 | IP リテラルや DNS 名として不正なホストは SNI として送らない | rustls の `ServerName` の制約 |
+| D22 | 自分自身が信頼済みルートではない `CA:TRUE` の leaf 証明書は、別のルートにつながっていても拒否する（OpenSSL は受け入れる） | rustls の検証規則。信頼済みルートと一致する leaf は受け入れる |
+| D23 | 署名が SHA-224 の証明書では `server_endpoint_channel_binding` が unavailable になる | ring が SHA-224 を持たない |
+| D24 | ホストに OpenSSL 形式の証明書の置き場所が無いとき、システムルートとして Node の同梱ストアを使う（本家は空） | 証明書が見つからない環境でも trust=1 を使えるようにするため |

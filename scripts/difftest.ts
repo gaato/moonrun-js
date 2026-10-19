@@ -358,7 +358,9 @@ function compare(c: Case, dir: string, ref: Outcome, js: Outcome, pending: Set<s
   const details: string[] = [];
   // D5: the program names itself moonrun-js in usage and version texts.
   const programName = (s: string): string =>
-    (c.divergences ?? []).includes('D5') ? s.replaceAll('Usage: moonrun-js ', 'Usage: moonrun ') : s;
+    (c.divergences ?? []).includes('D5')
+      ? s.replaceAll('Usage: moonrun-js ', 'Usage: moonrun ')
+      : s;
   const text = (name: 'stdout' | 'stderr'): void => {
     const a = normalize(ref, dir, ref[name]);
     const b = programName(normalize(js, dir, js[name]));

@@ -1,0 +1,40 @@
+[package]
+name = "tls-engine"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "rustls driven through moonrun's buffer-in/buffer-out TLS contract, built for wasm32-unknown-unknown"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Without rustls' `std` feature: `std` would require `rustls-pki-types/std`, whose
+# `UnixTime::now()` does not exist on wasm32-unknown-unknown (no patch needed this way).
+# The crate itself still uses std; only rustls is built as no_std + alloc and is
+# driven through its unbuffered API.
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "tls12"] }
+# ring is patched (see patches/README.md) so that `SystemRandom` uses getrandom's
+# custom backend on wasm32-unknown-unknown.
+ring = { version = "=0.17.14", default-features = false, features = ["alloc", "less-safe-getrandom-custom-or-rdrand"] }
+getrandom = { version = "0.2", features = ["custom"] }
+webpki-roots = { version = "1", optional = true }
+
+[features]
+default = []
+# Bundles Mozilla's roots for hosts without a trust store (e.g. a browser build).
+# Off by default: the host passes system roots in as DER.
+webpki-roots = ["dep:webpki-roots"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Prepared by scripts/build-tls.ts from the pinned crates.io tarball plus
+# patches/ring-0.17.14-wasm32-custom-getrandom.patch.
+[patch.crates-io]
+ring = { path = "../../.cache/tls-engine/ring-0.17.14" }
