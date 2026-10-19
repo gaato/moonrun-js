@@ -4,11 +4,11 @@ import { err, type HostError, ok, type Result } from '../../ports/result.ts';
 import type { BrowserHost } from './host.ts';
 import { BrowserControl, runBrowserGuest } from './runtime.ts';
 import {
+  asyncWriter,
   type BrowserIo,
   BrowserOutput,
   BrowserStdin,
   type ByteReader,
-  callbackWriter,
 } from './streams.ts';
 import type { MemoryVfs } from './vfs.ts';
 
@@ -60,7 +60,7 @@ export interface ProcessDeps {
   readonly resolver: ResolveCommand | undefined;
   readonly parent: BrowserHost;
   readonly io: BrowserIo;
-  readonly vfs: MemoryVfs;
+  readonly vfs: Pick<MemoryVfs, 'duplicate'>;
   readonly tree: ProcessTree;
   child(request: SpawnRequest, io: BrowserIo, control: BrowserControl, pid: number): BrowserHost;
 }
@@ -70,15 +70,16 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
       if (deps.resolver === undefined) return err({ code: 'ENOSYS' });
       if (treeClosed(deps.tree)) return err({ code: 'EINTR' });
       if (request.extraFds.length > 0) return err({ code: 'ENOSYS' });
-      const cwd = deps.parent.files.realpath(request.cwd ?? '.');
-      if (!cwd.ok) return cwd;
-      const kind = deps.parent.fs.kind(cwd.value);
+      const canonical = await deps.parent.files.async.realpath(request.cwd ?? '.');
+      if (!canonical.ok) return canonical;
+      const cwd = new TextDecoder().decode(canonical.value);
+      const kind = await deps.parent.files.async.statAt(undefined, cwd, true);
       if (!kind.ok) return kind;
-      if (kind.value !== 'dir') return err({ code: 'ENOTDIR' });
+      if (kind.value.kind !== 'dir') return err({ code: 'ENOTDIR' });
       let wasm: Uint8Array | WebAssembly.Module | undefined;
       try {
         wasm = await deps.resolver(request.program, request.argv.slice(1), {
-          cwd: cwd.value,
+          cwd,
           env: childEnvironment(request.env),
         });
       } catch {
@@ -113,7 +114,14 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
             if (!r.ok) throw r.error;
             return r.value;
           };
-          stdin = { read, readAsync: async (buffer) => read(buffer) };
+          stdin = {
+            read,
+            readAsync: async (buffer) => {
+              const result = await deps.parent.files.async.read(fd, buffer);
+              if (!result.ok) throw result.error;
+              return result.value;
+            },
+          };
         } else return err({ code: 'EBADF' });
         const output = (index: 1 | 2) => {
           const spec = request.stdio[index];
@@ -128,9 +136,13 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
           if (spec.fd === 2) return deps.io.stderr;
           if (spec.fd < 3) throw { code: 'EBADF' };
           const fd = duplicate(spec.fd);
-          return callbackWriter((bytes) => {
-            const r = deps.parent.files.write(fd, bytes);
-            if (!r.ok) throw r.error;
+          return asyncWriter(async (bytes) => {
+            for (let offset = 0; offset < bytes.length; ) {
+              const r = await deps.parent.files.async.write(fd, bytes.subarray(offset));
+              if (!r.ok) throw r.error;
+              if (r.value === 0) throw { code: 'EIO' };
+              offset += r.value;
+            }
           });
         };
         const out = output(1);
@@ -141,7 +153,7 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
         const pid = allocatePid();
         const control = new BrowserControl();
         deps.tree.controls.set(pid, control);
-        const host = deps.child({ ...request, cwd: cwd.value }, io, control, pid);
+        const host = deps.child({ ...request, cwd }, io, control, pid);
         let exit: ChildExit | undefined;
         const exits: ((exit: ChildExit) => void)[] = [];
         const process: ChildProcess = {

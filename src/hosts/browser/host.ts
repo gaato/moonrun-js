@@ -6,6 +6,8 @@ import type { RunOutcome } from '../../engine/run.ts';
 import type { Host } from '../../ports/host.ts';
 import type { SpawnRequest } from '../../ports/process.ts';
 import { ok } from '../../ports/result.ts';
+import type { BrowserMounts } from './mount-provider.ts';
+import { MountedVfs } from './mounted-vfs.ts';
 import { BrowserDns, browserNet } from './net.ts';
 import { allocatePid, browserProcess, childEnvironment, type ResolveCommand } from './process.ts';
 import { BrowserControl, runBrowserGuest } from './runtime.ts';
@@ -16,6 +18,7 @@ export interface BrowserHostOptions {
   readonly env?: Readonly<Record<string, string>>;
   readonly cwd?: string;
   readonly files?: BrowserFiles;
+  readonly mounts?: BrowserMounts;
   readonly stdout?: (bytes: Uint8Array) => void;
   readonly stderr?: (bytes: Uint8Array) => void;
   /** A synchronous byte source (read into the buffer, return count), or finite input. Default EOF. */
@@ -66,7 +69,18 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     compile(new URL('./sqlite-engine.wasm', import.meta.url)),
     options.roots === undefined ? relayRoots(options.relay) : Promise.resolve(options.roots),
   ]);
-  const vfs = new MemoryVfs(options.files, options.cwd);
+  const vfs =
+    options.mounts === undefined || Object.keys(options.mounts).length === 0
+      ? new MemoryVfs(options.files, options.cwd)
+      : new MountedVfs(options.files, options.cwd, options.mounts);
+  let rootCwd = options.cwd ?? '/work';
+  if (vfs instanceof MountedVfs) {
+    const cwd = await vfs.files.async.realpath(rootCwd);
+    if (!cwd.ok) throw new Error(`browser cwd: ${cwd.error.code}`);
+    rootCwd = new TextDecoder().decode(cwd.value);
+    const stat = await vfs.files.async.statAt(undefined, rootCwd, true);
+    if (!stat.ok || stat.value.kind !== 'dir') throw new Error('browser cwd: ENOTDIR');
+  }
   const tree = { controls: new Map<number, BrowserControl>(), closed: false };
   const rootPid = allocatePid();
   const source = options.stdin;
@@ -219,5 +233,5 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
   };
   const control = new BrowserControl();
   tree.controls.set(rootPid, control);
-  return make(rootIo, options.cwd ?? '/work', options.env ?? {}, control, rootPid, false);
+  return make(rootIo, rootCwd, options.env ?? {}, control, rootPid, false);
 }

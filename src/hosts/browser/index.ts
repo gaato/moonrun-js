@@ -1,9 +1,12 @@
 import type { RunOutcome } from '../../engine/run.ts';
 import type { BrowserRunRequest, WorkerMessage, WorkerReply } from './execute.ts';
 import type { BrowserSignalOptions } from './host.ts';
+import type { BrowserMounts } from './mount-provider.ts';
+import { MountServer } from './mount-rpc.ts';
 import type { ResolveCommand } from './process.ts';
 
 export type { RunOutcome } from '../../engine/run.ts';
+export { type BrowserDirectoryHandle, directoryHandleProvider } from './directory-provider.ts';
 export type { BrowserRunRequest } from './execute.ts';
 export {
   type BrowserHost,
@@ -11,6 +14,13 @@ export {
   type BrowserSignalOptions,
   createBrowserHost,
 } from './host.ts';
+export type {
+  BrowserMounts,
+  MountEntry,
+  MountFile,
+  MountProvider,
+  MountStat,
+} from './mount-provider.ts';
 export type { CommandContext, ResolveCommand } from './process.ts';
 export { BrowserStdin } from './streams.ts';
 export type { BrowserFiles } from './vfs.ts';
@@ -26,9 +36,10 @@ const web = globalThis as unknown as {
   Worker: new (url: URL, options: { type: 'module' }) => ModuleWorker;
 };
 export interface WorkerRunOptions
-  extends Omit<BrowserRunRequest, 'stdin' | 'commands' | 'streaming'> {
+  extends Omit<BrowserRunRequest, 'stdin' | 'commands' | 'streaming' | 'mounts'> {
   readonly stdin?: Uint8Array | 'stream';
   readonly resolveCommand?: ResolveCommand;
+  readonly mounts?: BrowserMounts;
   readonly stdout?: (bytes: Uint8Array) => void;
   readonly stderr?: (bytes: Uint8Array) => void;
 }
@@ -48,6 +59,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
     options === undefined ? undefined : Promise.resolve(false);
   const promise = new Promise<RunOutcome>((resolve, reject) => {
     const worker = new web.Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    const mounts = new MountServer(options.mounts ?? {});
     let done = false;
     let ended = false;
     let id = 0;
@@ -57,6 +69,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
     const stop = (): void => {
       done = true;
       worker.terminate();
+      mounts.close();
       for (const input of inputs.values()) input.reject(new Error('Run has ended'));
       inputs.clear();
       for (const resolve of signals.values()) resolve(false);
@@ -77,6 +90,14 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
     worker.onmessage = ({ data: reply }) => {
       try {
         switch (reply.type) {
+          case 'mount':
+            void mounts
+              .call(reply.mount, reply.request)
+              .then((result) => {
+                if (!done) worker.postMessage({ type: 'mounted', id: reply.id, result });
+              })
+              .catch(failure);
+            break;
           case 'outcome':
             finish(reply.outcome);
             break;
@@ -187,6 +208,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
       stderr: _stderr,
       resolveCommand: resolver,
       stdin,
+      mounts: _mounts,
       ...request
     } = options;
     try {
@@ -197,6 +219,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
           ...(stdin instanceof Uint8Array ? { stdin } : {}),
           streaming: stdin === 'stream',
           commands: resolver !== undefined,
+          ...(options.mounts === undefined ? {} : { mounts: mounts.descriptions }),
         },
       });
     } catch (e) {

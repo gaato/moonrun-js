@@ -62,6 +62,7 @@ API is not stable yet.
 ## Browser
 
 A Web API host and dedicated Worker runner are exported from `moonrun-js/browser`.
+Embedders can mount asynchronous filesystem providers, including user-picked folders and OPFS; see [browser mounts](docs/browser.md#asynchronous-filesystem-mounts).
 From a checkout, start the local demo with:
 
 ```fish
@@ -71,7 +72,7 @@ mise exec -- pnpm demo:browser
 Open the printed localhost URL in Chrome, select a wasm, enter arguments and Run.
 Output streams as bytes; files live in memory under `/work`. HTTPS uses rustls over a
 localhost WebSocket relay with an explicit destination allowlist and the relay machine's
-roots. Native processes, OS signals, listeners, UDP and persistent files are unavailable.
+roots. Native processes, OS signals, listeners and UDP are unavailable; persistent files require explicit mounts.
 See [browser setup, embedding and relay protocol](docs/browser.md). Chrome verification
 is pending; automated coverage runs under Node without a browser.
 

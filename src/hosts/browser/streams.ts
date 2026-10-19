@@ -273,6 +273,42 @@ export function callbackWriter(write: (bytes: Uint8Array) => void): ByteWriter {
     retain: () => () => {},
   };
 }
+
+/** Async file redirection: every queued write applies backpressure until it commits. */
+export function asyncWriter(write: (bytes: Uint8Array) => Promise<void>): ByteWriter {
+  const base = callbackWriter(() => {});
+  const drains = new Set<() => void>();
+  let pending: Promise<void> | undefined;
+  let closed = false;
+  const destroy = () => {
+    closed = true;
+    base.destroy();
+  };
+  return {
+    ...base,
+    destroy,
+    write: (bytes) => {
+      if (closed) throw ioError('EPIPE');
+      const copy = bytes.slice();
+      const current = (pending ?? Promise.resolve()).then(() => write(copy));
+      pending = current;
+      void current.then(() => {
+        if (pending === current) {
+          pending = undefined;
+          for (const drain of [...drains]) drain();
+        }
+      }, destroy);
+      return false;
+    },
+    ready: () => pending,
+    onDrain: (listener) => {
+      drains.add(listener);
+      return () => {
+        drains.delete(listener);
+      };
+    },
+  };
+}
 export interface BrowserIo {
   readonly stdin: ByteReader;
   readonly stdout: ByteWriter;

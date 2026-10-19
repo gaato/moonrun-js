@@ -11,7 +11,8 @@ its engine. Select a `.wasm` or paste a CORS-enabled URL, enter arguments as a J
 array (without the CLI `--` separator), then Run. stdout/stderr stream separately;
 the status shows the `RunOutcome` and exit code. The demo uses finite UTF-8 stdin. Extra
 files are preloaded under `/work`. Each Run creates and terminates a dedicated module
-Worker, with fresh environment, DNS mappings and filesystem. Reload to stop a guest
+Worker, with fresh environment, DNS mappings and memory filesystem; external mounts can
+persist independently. Reload to stop a guest
 that never finishes. Streaming stdin is available to embedders; the demo has no terminal or persistent filesystem UI.
 
 For an already built checkout:
@@ -77,6 +78,108 @@ of base64 DER certificates from the relay machine's existing `nodeTrustStore` ad
 (including its documented Node fallback, D24). An explicit `roots` array overrides this.
 Without a relay or explicit roots the system-root list is empty. TLS verification is
 never disabled. These are **not the browser's roots** (D44).
+
+## Asynchronous filesystem mounts
+
+Both `runInWorker` and `createBrowserHost` accept `mounts: Record<string, MountProvider>`.
+Mount keys are absolute guest paths. Resolution uses the longest path-component prefix;
+`/mnt/local` does not match `/mnt/locality`. Mounts and their parent directories appear
+in directory listings. Nested mounts shadow the enclosing provider at their mount point.
+Everything else stays in the existing memory VFS; cwd must exist and be a directory.
+The VFS and mounts are shared with wasm children, with separate cwd views and shared
+open-file offsets for duplicated descriptors.
+
+```ts
+import { directoryHandleProvider, runInWorker } from 'moonrun-js/browser';
+
+// In a user-gesture handler, before starting the Worker:
+const picked = await window.showDirectoryPicker({ mode: 'readwrite' });
+const opfs = await navigator.storage.getDirectory();
+const running = runInWorker({
+  wasm: programBytes,
+  mounts: {
+    '/mnt/local': directoryHandleProvider(picked),
+    '/mnt/opfs': directoryHandleProvider(opfs),
+    '/mooncakes': customProvider,
+  },
+  stdout: consumeStdoutBytes,
+  stderr: consumeStderrBytes,
+});
+```
+
+**One threading model:** providers passed to `runInWorker` stay on the main thread.
+Only operation requests, Result values and byte ranges cross `postMessage`; callback
+functions and native directory handles are never cloned. Open readers get private RPC
+ids and are released when their last descriptor closes or the Worker finishes. Late
+opens after termination are released too. This keeps permission-bearing handles and an
+embedder's fetch/cache state together and gives every provider the same contract.
+For `createBrowserHost`, provider functions execute in the caller's realm: call it inside
+your own Worker if you want providers to run there instead. Guest execution and component
+compilation still belong in a dedicated Worker.
+
+The exported `MountProvider` needs just three async functions. Paths are absolute **within
+that provider**, with `/` as its root; they never contain the guest's mount prefix.
+Each function returns `{ok: true, value}` or `{ok: false, error: {code}}` using the existing
+`HostError` codes. Rejected promises become EIO; intentional failures should return a
+Result. Providers own their fetching and caching policy.
+
+| Function | Successful value |
+|---|---|
+| `stat(path)` | `{kind, size?, mtimeMs?, mode?}`; file size is required; directory size defaults to 0 |
+| `readdir(path)` | array of `{name, kind}`, without `.` or `..`; names are single path components |
+| `open(path)` | `{size, read(offset, length), close?}`; read returns a Result of bytes, close is synchronous cleanup |
+
+Kinds are `file`, `dir`, `symlink` or `other`. Reads may return fewer bytes than requested;
+an empty range means EOF. Range reads do not require loading a whole file. Optional
+`readlink(path)` returns its target string; guest-namespace symlinks are followed with
+the same 40-link bound, including links across mounts. Mount points are synthetic
+directories. Provider file metadata maps to Linux stat: stable inode per guest path per
+run, synthetic device/uid/gid, file modes 0444 or 0644, directory modes 0555 or 0755 based
+on write capabilities, mtime in milliseconds (default 0). `mode` overrides permission
+bits, while `kind` supplies the type bits. Other timestamps are synthetic.
+
+Optional write capabilities are `create(path)`, `write(path, offset, bytes)` (byte count),
+`truncate(path, size)`, `mkdir(path)`, `remove(path)` (file or empty directory), and
+`rename(from, to)`; the others return `void` inside the successful Result. Missing
+capabilities fail with EROFS. Cross-mount rename is EXDEV; removing/renaming mount points
+is EBUSY. Open/truncate and async reads/writes/stat/statx/fstatx/readdir/access/realpath
+use the existing async filesystem jobs. Issued fs jobs remain non-abortable: cancellation
+waits for completion (compat cancel returns 0), including provider writes. Provider calls
+already issued when a Worker is terminated may still complete on the main thread.
+Writes commit before their returned Promise resolves; fsync waits for queued descriptor
+writes and adds no provider-specific durability guarantee. chmod, symlink creation and
+watching mounted paths are unsupported (EROFS/ENOSYS).
+
+The VFS normally caches metadata, directory listings and fetched byte ranges for the
+run; byte caching is capped at 64 MiB total, independently of file size. Mutations made
+through this VFS invalidate affected cached paths. Set `cache: false` on a provider to
+disable these caches and observe outside changes on subsequent async operations. Open
+readers should then obtain current bytes on each range read. There is no coherent snapshot
+or cross-tab transaction guarantee. Foreign open-file behavior after outside rename or
+unlink is provider-dependent; mounted descriptors are path-backed, not native POSIX fds.
+
+**Synchronous limitation:** legacy `__moonbit_fs_unstable` and WASI imports cannot await
+a provider. They can use metadata/listings/ranges already cached by earlier async access;
+uncached data returns EAGAIN at the port. WASI maps that to AGAIN (6); legacy reads use
+their existing panic/SIGABRT behavior (`Failed to read file: …`). Whole-file reads need
+the complete file cached, so files exceeding the byte-cache budget remain async-only.
+With `cache: false`, provider content remains async-only. Mount points and their parent
+directories are always visible. Synchronous writes and truncate on mounts return EROFS
+even for a writable provider; they cannot safely persist changes asynchronously.
+
+`directoryHandleProvider(handle, {readOnly?, cache?})` ships with the browser entry.
+It works with picked folders and OPFS, defaults to read/write and `cache: false`, and
+uses `File.slice()` for range reads. Grant permissions on the main thread before use;
+the helper does not request permission or show a picker. Permission failures are EACCES,
+quota failures ENOSPC, missing entries ENOENT, and type mismatches ENOTDIR/EISDIR.
+Writes serialize through `createWritable({keepExistingData: true})` and close before
+reporting success, preserving unwritten bytes; errors abort the temporary stream.
+[createWritable changes become visible on close](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemFileHandle/createWritable).
+Rename uses native `move()` only when available and otherwise returns ENOSYS, with no
+copy/delete emulation: [availability is limited, especially outside OPFS and for directories](https://developer.chrome.com/docs/capabilities/web-apis/file-system-access#renaming-and-moving-files-and-folders).
+There are no symlinks, POSIX ownership/permission bits, OS locks or file watches in this
+provider. Exclusive create is a stat-then-create check, not an atomic OS operation.
+The demo does not add folder-picker UI; these are embedding APIs.
 
 ## Wasm child commands and streaming input
 
@@ -232,15 +335,17 @@ never unwraps TLS. Listen/accept, UDP and network interface enumeration are unav
 
 Pure computation, core/legacy output, args/env, finite stdin, ordinary memory filesystem
 I/O, async timers, and SQLite using the same synchronous VFS are supported. Filesystem
-watching, native processes, OS/tty signals, listeners, UDP, persistent storage and access
-to host files are unavailable; optional wasm processes and virtual signals are described above. Paths are UTF-8 strings, metadata is synthetic, files are
-limited to 64 MiB, and directory order is insertion order (D41–D44).
+watching, native processes, OS/tty signals, listeners and UDP are unavailable. Persistence
+and picked host folders require explicit async mounts; wasm processes and virtual signals
+are opt-in too. Memory files remain limited to 64 MiB, metadata is synthetic and directory
+order is insertion order; mounted file sizes and order come from their providers (D41–D47).
 
 Expected skill cases: kbbi/discord-cli `--help` and discord-cli's no-token error require
 no network. kbbi lookup, discord-cli API calls and web-fetch of `https://example.com`
 should work through the default allowlist and relay roots; other web-fetch destinations
 need `--allow`. Skills that launch provided wasm commands can use the resolver; native binaries,
-UDP/listeners and host files remain unavailable. This is expected coverage, **not a Chrome test result**.
+UDP/listeners remain unavailable; host files require a granted directory handle mount.
+This is expected coverage, **not a Chrome test result**.
 
 Node/vitest tests cover VFS contracts, DNS aliases, relay authentication and destination
 rejection, opaque data and FIN, EAGAIN/drain, receive credit, component preparation,
@@ -249,7 +354,7 @@ guest args/env/stdio/exit, SQLite commits and reopen, and the real Worker entry 
 checks wasm/Worker assets. Chrome verification is left to the coordinator; no browser
 or persistent demo server is started as part of implementation verification.
 
-The shell tests download cli/sh, cli/tr and cli/cat 0.2.1 only into `.cache/browser-shell/` and
+The shell tests download cli/sh, cli/tr, cli/cat, cli/ls and cli/grep 0.2.1 only into `.cache/browser-shell/` and
 verify fixed SHA-256 digests on every use. Tests compare pipelines, missing-command
 messages/status, nested sh and interactive output with the Node CLI using native host
 commands. Additional tests cover large pipeline backpressure, cwd/env/file redirection,
@@ -257,3 +362,7 @@ merged output, precompiled children, traps/compile failures, kill/wait and SIGIN
 Group SIGINT tests cover cli/sh with a streaming cat, a cat pipeline and a nested shell,
 checking that the top Run ends too, plus delivery with no children. A small WAT parent
 captures SIGINT through the guest ABI, survives, and verifies its child's wait status -2.
+Mount tests run ls/cat/grep against delayed main-thread providers through a real Worker,
+test mounted redirects, longest-prefix routing, read-only failures, caching and issued-job
+cancellation, and exercise the native-directory provider with fake Web API handles.
+Small WASI and legacy guests pin the synchronous cache limitation.

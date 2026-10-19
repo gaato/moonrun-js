@@ -1,3 +1,4 @@
+import type { HostError, Result } from '../../ports/result.ts';
 import {
   type BrowserRunRequest,
   executeBrowserRun,
@@ -5,6 +6,7 @@ import {
   type WorkerReply,
 } from './execute.ts';
 import type { BrowserSignalOptions } from './host.ts';
+import { type MountValue, proxyMounts } from './mount-rpc.ts';
 import { BrowserStdin } from './streams.ts';
 
 const scope = globalThis as unknown as {
@@ -20,6 +22,7 @@ let nextRequest = 0;
 let started = false;
 let deliver: ((signal: number, options?: BrowserSignalOptions) => boolean) | undefined;
 const signals: Extract<WorkerMessage, { type: 'signal' }>[] = [];
+const mountCalls = new Map<number, (result: Result<MountValue, HostError>) => void>();
 function signal(request: Extract<WorkerMessage, { type: 'signal' }>): void {
   const delivered =
     deliver?.(request.signal, request.target === 'group' ? { target: 'group' } : undefined) ??
@@ -29,6 +32,19 @@ function signal(request: Extract<WorkerMessage, { type: 'signal' }>): void {
 }
 function start(request: BrowserRunRequest): void {
   void executeBrowserRun(request, (reply) => scope.postMessage(reply), {
+    ...(request.mounts === undefined
+      ? {}
+      : {
+          mounts: proxyMounts(
+            request.mounts,
+            (mount, request) =>
+              new Promise((resolve) => {
+                const id = ++nextRequest;
+                mountCalls.set(id, resolve);
+                scope.postMessage({ type: 'mount', id, mount, request });
+              }),
+          ),
+        }),
     ...(request.streaming === true ? { stdin } : {}),
     ...(request.commands === true
       ? {
@@ -51,6 +67,10 @@ function start(request: BrowserRunRequest): void {
 }
 scope.onmessage = ({ data }) => {
   switch (data.type) {
+    case 'mounted':
+      mountCalls.get(data.id)?.(data.result);
+      mountCalls.delete(data.id);
+      break;
     case 'run':
       if (!started) {
         started = true;

@@ -9,6 +9,7 @@ import { runInWorker } from '../../src/hosts/browser/index.ts';
 import { type CommandContext, childExit } from '../../src/hosts/browser/process.ts';
 import { BrowserStdin } from '../../src/hosts/browser/streams.ts';
 import type { ChildProcess } from '../../src/ports/process.ts';
+import { fakeMount } from './mount-fakes.ts';
 
 const root = new URL('../../', import.meta.url);
 const cache = new URL('.cache/browser-shell/', root);
@@ -17,6 +18,8 @@ const hashes: Readonly<Record<string, string>> = {
   sh: '362fa346d75afaa0744739b0fb29c158e2873487b5daa7b8ecedf2ff70d25153',
   tr: '9fbddcf123bd6b5c6b37c01686ab8b7c9b2769d974b3a7be2b589a213f0debf7',
   cat: '0077933f172648eee22f902f14c83ca6c732afda50d1a7c1c47163ec4e587374',
+  ls: 'a9cefa72d5504acd98396a84c00192e12d18458cf4baef17aae26adc66124dc0',
+  grep: '6c7e3e7a6ff8b76916f7c1085a48fda5085a24366cf63829b437895b95586341',
 };
 const modules = new Map<string, Uint8Array>();
 let scratch: string;
@@ -29,7 +32,7 @@ const assets: Readonly<Record<string, string>> = {
 beforeAll(async () => {
   await mkdir(cache, { recursive: true });
   scratch = await mkdtemp(new URL('tests-', cache).pathname);
-  for (const name of ['sh', 'tr', 'cat']) {
+  for (const name of ['sh', 'tr', 'cat', 'ls', 'grep']) {
     const file = new URL(`${name}.wasm`, cache);
     let bytes: Uint8Array;
     try {
@@ -172,6 +175,78 @@ function bridge(): () => Promise<void> {
 }
 
 describe('browser wasm processes with cli/sh 0.2.1', () => {
+  it('runs ls, cat and grep against delayed providers on the main thread, including nested mounts', async () => {
+    const close = bridge();
+    const delay = async () => new Promise<void>((resolve) => setTimeout(resolve, 1));
+    const outer = fakeMount({ 'data.txt': 'apple\nbanana\napple pie\n', sub: null }, { delay });
+    const inner = fakeMount({ 'nested.txt': 'nested\n' }, { delay });
+    let stdout = '';
+    let stderr = '';
+    const handle = runInWorker({
+      wasm: bytes('sh'),
+      name: 'sh',
+      args: [
+        '-c',
+        'echo LIST; ls /mnt/local; echo CAT; cat /mnt/local/data.txt; echo GREP; grep apple /mnt/local/data.txt; echo NESTED; cat /mnt/local/sub/nested.txt',
+      ],
+      mounts: { '/mnt/local': outer.provider, '/mnt/local/sub': inner.provider },
+      resolveCommand: async (name) => modules.get(name),
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+      stderr: (b) => {
+        stderr += new TextDecoder().decode(b);
+      },
+    });
+    try {
+      expect(await handle).toEqual({ kind: 'completed' });
+      expect(stderr).toBe('');
+      expect(stdout).toMatch(
+        /LIST\n[\s\S]*data.txt[\s\S]*sub[\s\S]*CAT\napple\nbanana\napple pie\nGREP\napple\napple pie\nNESTED\nnested\n/,
+      );
+      expect(outer.calls.some((c) => c.op === 'readdir')).toBe(true);
+      expect(inner.calls.some((c) => c.op === 'read')).toBe(true);
+      expect(outer.calls.some((c) => c.path.includes('nested.txt'))).toBe(false);
+      expect(outer.calls.filter((c) => c.op === 'open')).toHaveLength(
+        outer.calls.filter((c) => c.op === 'close').length,
+      );
+    } finally {
+      await close();
+    }
+  }, 15000);
+  it('uses asynchronous mounted descriptors for child input and output redirection', async () => {
+    stubAssets();
+    const { provider, memory } = fakeMount(
+      { data: 'hello\n' },
+      { writable: true, delay: async () => new Promise((resolve) => setTimeout(resolve, 1)) },
+    );
+    let stdout = '';
+    let stderr = '';
+    const host = await createBrowserHost({
+      mounts: { '/mnt': provider },
+      resolveCommand: async (name) => modules.get(name),
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+      stderr: (b) => {
+        stderr += new TextDecoder().decode(b);
+      },
+    });
+    expect(
+      await host.run(bytes('sh'), {
+        name: 'sh',
+        args: [
+          '-c',
+          'cat /mnt/data > /mnt/copy; cat < /mnt/copy; tr a-z A-Z < /mnt/data > /mnt/upper; cat /mnt/upper',
+        ],
+      }),
+    ).toEqual({ kind: 'completed' });
+    expect({ stdout, stderr }).toEqual({ stdout: 'hello\nHELLO\n', stderr: '' });
+    expect(memory.fs.readFile('/copy')).toEqual({
+      ok: true,
+      value: new TextEncoder().encode('hello\n'),
+    });
+  }, 15000);
   for (const script of [
     'echo hello | tr a-z A-Z',
     'false; echo $?; definitely_missing_command; echo $?',

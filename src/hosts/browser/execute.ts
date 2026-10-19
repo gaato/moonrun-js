@@ -1,18 +1,28 @@
 import type { RunOutcome } from '../../engine/run.ts';
+import type { HostError, Result } from '../../ports/result.ts';
 import { type BrowserHostOptions, type BrowserSignalOptions, createBrowserHost } from './host.ts';
+import type { BrowserMounts } from './mount-provider.ts';
+import type { MountCall, MountDescriptions, MountValue } from './mount-rpc.ts';
 import type { CommandContext, ResolveCommand } from './process.ts';
 import type { BrowserStdin } from './streams.ts';
 
 export interface BrowserRunRequest
-  extends Omit<BrowserHostOptions, 'stdout' | 'stderr' | 'stdin' | 'resolveCommand'> {
+  extends Omit<BrowserHostOptions, 'stdout' | 'stderr' | 'stdin' | 'resolveCommand' | 'mounts'> {
   readonly wasm: Uint8Array;
   readonly args?: readonly string[];
   readonly name?: string;
   readonly stdin?: Uint8Array;
   readonly streaming?: boolean;
   readonly commands?: boolean;
+  readonly mounts?: MountDescriptions;
 }
 export type WorkerReply =
+  | {
+      readonly type: 'mount';
+      readonly id: number;
+      readonly mount: string;
+      readonly request: MountCall;
+    }
   | { readonly type: 'stdout' | 'stderr'; readonly bytes: Uint8Array }
   | { readonly type: 'outcome'; readonly outcome: RunOutcome }
   | { readonly type: 'input-ack'; readonly id: number }
@@ -25,6 +35,11 @@ export type WorkerReply =
       readonly context: CommandContext;
     };
 export type WorkerMessage =
+  | {
+      readonly type: 'mounted';
+      readonly id: number;
+      readonly result: Result<MountValue, HostError>;
+    }
   | { readonly type: 'run'; readonly request: BrowserRunRequest }
   | { readonly type: 'input'; readonly id: number; readonly bytes: Uint8Array }
   | { readonly type: 'input-end' }
@@ -48,13 +63,16 @@ export async function executeBrowserRun(
   capabilities: {
     readonly stdin?: BrowserStdin;
     readonly resolveCommand?: ResolveCommand;
+    readonly mounts?: BrowserMounts;
     readonly ready?: (signal: (signal: number, options?: BrowserSignalOptions) => boolean) => void;
   } = {},
 ): Promise<void> {
   let outcome: RunOutcome;
   try {
+    const { mounts: _mounts, ...hostOptions } = request;
     const host = await createBrowserHost({
-      ...request,
+      ...hostOptions,
+      ...(capabilities.mounts === undefined ? {} : { mounts: capabilities.mounts }),
       ...(capabilities.stdin === undefined ? {} : { stdin: capabilities.stdin }),
       ...(capabilities.resolveCommand === undefined
         ? {}

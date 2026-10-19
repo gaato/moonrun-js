@@ -6,7 +6,9 @@ import { SqliteEngine } from '../../src/domains/sqlite/engine.ts';
 import { executeBrowserRun, type WorkerReply } from '../../src/hosts/browser/execute.ts';
 import { createBrowserHost } from '../../src/hosts/browser/host.ts';
 import { runInWorker } from '../../src/hosts/browser/index.ts';
+import { take } from '../../src/hosts/browser/mount-provider.ts';
 import { compileBytes, run } from '../../src/index.ts';
+import { fakeMount } from './mount-fakes.ts';
 
 const assets: Readonly<Record<string, string>> = {
   'moonrun-diag.wasm': 'diagnostics/moonrun-diag.wasm',
@@ -38,6 +40,83 @@ function stubAssets(): ReturnType<typeof vi.fn> {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser host under Node Web APIs', () => {
+  it('canonicalizes a cwd reached through a mounted symlink', async () => {
+    stubAssets();
+    const { provider, memory } = fakeMount({ 'dir/file': 'data' });
+    take(memory.files.symlink('dir', '/alias'));
+    const host = await createBrowserHost({ cwd: '/mnt/alias', mounts: { '/mnt': provider } });
+    expect(host.fs.cwd()).toEqual({ ok: true, value: '/mnt/dir' });
+    const fd = take(
+      await host.files.async.open('file', {
+        access: 'read',
+        create: false,
+        append: false,
+        exclusive: false,
+        truncate: false,
+      }),
+    );
+    expect(take(await host.files.async.fstat(fd)).size).toBe(4n);
+    host.files.close(fd);
+  });
+  for (const legacy of [false, true]) {
+    it(`${legacy ? 'legacy' : 'WASI'} synchronous paths see mounts only after async caching`, async () => {
+      const source = legacy
+        ? `(module
+        (import "_" "/work/mnt/data.txt" (global $path externref))
+        (import "__moonbit_fs_unstable" "read_file_to_string" (func $read (param externref) (result externref)))
+        (func (export "_start") global.get $path call $read drop))`
+        : `(module
+        (import "wasi_snapshot_preview1" "path_open" (func $open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+        (import "wasi_snapshot_preview1" "fd_read" (func $read (param i32 i32 i32 i32) (result i32)))
+        (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+        (memory (export "memory") 1)
+        (data (i32.const 0) "mnt/data.txt")
+        (func (export "_start") (local $error i32)
+          (local.set $error (call $open (i32.const 3) (i32.const 1) (i32.const 0) (i32.const 12) (i32.const 0) (i64.const 2) (i64.const 0) (i32.const 0) (i32.const 32)))
+          (if (local.get $error) (then (call $exit (local.get $error))))
+          (i32.store (i32.const 40) (i32.const 128)) (i32.store (i32.const 44) (i32.const 5))
+          (local.set $error (call $read (i32.load (i32.const 32)) (i32.const 40) (i32.const 1) (i32.const 48)))
+          (if (local.get $error) (then (call $exit (local.get $error))))
+          (if (i32.ne (i32.load (i32.const 48)) (i32.const 5)) (then unreachable))
+          (if (i32.ne (i32.load (i32.const 128)) (i32.const 0x6c6c6568)) (then unreachable))
+          (if (i32.ne (i32.load8_u (i32.const 132)) (i32.const 111)) (then unreachable))))`;
+      const compiled = spawnSync('wasm-tools', ['parse', '-'], { input: source });
+      if (compiled.status !== 0) throw new Error(compiled.stderr.toString());
+      for (const cached of [false, true]) {
+        stubAssets();
+        const { provider } = fakeMount({ 'data.txt': 'hello' });
+        let stderr = '';
+        const host = await createBrowserHost({
+          mounts: { '/work/mnt': provider },
+          stderr: (b) => {
+            stderr += new TextDecoder().decode(b);
+          },
+        });
+        if (cached) {
+          const fd = take(
+            await host.files.async.open('/work/mnt/data.txt', {
+              access: 'read',
+              create: false,
+              append: false,
+              exclusive: false,
+              truncate: false,
+            }),
+          );
+          take(await host.files.async.read(fd, new Uint8Array(5)));
+          take(host.files.close(fd));
+        }
+        const outcome = await host.run(new Uint8Array(compiled.stdout));
+        expect(outcome).toEqual(
+          cached
+            ? { kind: 'completed' }
+            : legacy
+              ? { kind: 'signaled', signal: 6 }
+              : { kind: 'exited', code: 6 },
+        );
+        if (!cached && legacy) expect(stderr).toContain('Failed to read file: /work/mnt/data.txt');
+      }
+    });
+  }
   it('precompiles all four components, uses byte callbacks/input and per-run environment', async () => {
     const fetch = stubAssets();
     const host = await createBrowserHost({
