@@ -1,37 +1,66 @@
-import { compileBytes } from '../../engine/load.ts';
-import { type RunOutcome, run } from '../../engine/run.ts';
+import type { RunOutcome } from '../../engine/run.ts';
 import { type BrowserHostOptions, createBrowserHost } from './host.ts';
+import type { CommandContext, ResolveCommand } from './process.ts';
+import type { BrowserStdin } from './streams.ts';
 
-export interface BrowserRunRequest extends Omit<BrowserHostOptions, 'stdout' | 'stderr' | 'stdin'> {
+export interface BrowserRunRequest
+  extends Omit<BrowserHostOptions, 'stdout' | 'stderr' | 'stdin' | 'resolveCommand'> {
   readonly wasm: Uint8Array;
   readonly args?: readonly string[];
   readonly name?: string;
   readonly stdin?: Uint8Array;
+  readonly streaming?: boolean;
+  readonly commands?: boolean;
 }
 export type WorkerReply =
   | { readonly type: 'stdout' | 'stderr'; readonly bytes: Uint8Array }
-  | { readonly type: 'outcome'; readonly outcome: RunOutcome };
+  | { readonly type: 'outcome'; readonly outcome: RunOutcome }
+  | { readonly type: 'input-ack'; readonly id: number }
+  | {
+      readonly type: 'resolve';
+      readonly id: number;
+      readonly program: string;
+      readonly args: readonly string[];
+      readonly context: CommandContext;
+    };
+export type WorkerMessage =
+  | { readonly type: 'run'; readonly request: BrowserRunRequest }
+  | { readonly type: 'input'; readonly id: number; readonly bytes: Uint8Array }
+  | { readonly type: 'input-end' }
+  | { readonly type: 'signal'; readonly signal: number }
+  | {
+      readonly type: 'resolved';
+      readonly id: number;
+      readonly wasm: Uint8Array | WebAssembly.Module | undefined;
+      readonly failed: boolean;
+    };
 
-/** Worker body separated from its message transport for Node contract tests. */
+/** Worker body separated from transport for contract tests and non-browser embedders. */
 export async function executeBrowserRun(
   request: BrowserRunRequest,
   send: (reply: WorkerReply) => void,
+  capabilities: {
+    readonly stdin?: BrowserStdin;
+    readonly resolveCommand?: ResolveCommand;
+    readonly ready?: (signal: (signal: number) => void) => void;
+  } = {},
 ): Promise<void> {
   let outcome: RunOutcome;
   try {
     const host = await createBrowserHost({
       ...request,
+      ...(capabilities.stdin === undefined ? {} : { stdin: capabilities.stdin }),
+      ...(capabilities.resolveCommand === undefined
+        ? {}
+        : { resolveCommand: capabilities.resolveCommand }),
       stdout: (bytes) => send({ type: 'stdout', bytes }),
       stderr: (bytes) => send({ type: 'stderr', bytes }),
     });
-    const loaded = compileBytes(
-      request.wasm,
-      request.name ?? '/work/program.wasm',
-      host.diagnostics,
-    );
-    outcome = loaded.ok
-      ? await run(loaded.value, host, { args: request.args ?? [] })
-      : { kind: 'host-failure', failure: loaded.error };
+    capabilities.ready?.((signal) => host.signal(signal));
+    outcome = await host.run(request.wasm, {
+      name: request.name ?? '/work/program.wasm',
+      args: request.args ?? [],
+    });
   } catch (e) {
     outcome = { kind: 'host-failure', failure: { chain: [String(e)] } };
   }

@@ -1,4 +1,4 @@
-# Browser host and local demo (P7)
+# Browser host and local demo
 
 From a checkout with dependencies installed, one command builds and starts the demo:
 
@@ -9,10 +9,10 @@ mise exec -- pnpm demo:browser
 Open the printed `http://127.0.0.1:8080/?token=…` URL in Chrome with JSPI enabled in
 its engine. Select a `.wasm` or paste a CORS-enabled URL, enter arguments as a JSON
 array (without the CLI `--` separator), then Run. stdout/stderr stream separately;
-the status shows the `RunOutcome` and exit code. Stdin is finite UTF-8 input. Extra
+the status shows the `RunOutcome` and exit code. The demo uses finite UTF-8 stdin. Extra
 files are preloaded under `/work`. Each Run creates and terminates a dedicated module
 Worker, with fresh environment, DNS mappings and filesystem. Reload to stop a guest
-that never finishes. There is no interactive stdin or persistent filesystem UI.
+that never finishes. Streaming stdin is available to embedders; the demo has no terminal or persistent filesystem UI.
 
 For an already built checkout:
 
@@ -65,17 +65,107 @@ The Node CLI parser component is unnecessary. Run/guest compilation belongs in a
 Chrome restricts large synchronous module compilation on the main thread. Args go to
 `run(loaded, host, { args })`, rather than Host (the existing core contract).
 
-Host options additionally allow a synchronous stdin byte-source callback, cwd, and
-explicit DER `roots`. Output callbacks receive owned byte copies. `runInWorker` accepts
-only cloneable input, strips callbacks before posting, streams copied byte chunks back,
-and resolves the existing `RunOutcome`; it terminates the Worker on outcomes and Worker
-errors. Callback/structured-clone exceptions reject its Promise after termination.
+Host options additionally allow a synchronous stdin byte-source callback, `BrowserStdin`,
+cwd, and explicit DER `roots`. Output callbacks receive owned byte copies. `runInWorker`
+keeps callbacks on the main thread and sends cloneable messages to the Worker. Its return
+value remains an awaitable Promise of the existing `RunOutcome`, with input/signal methods
+as described below; it terminates the Worker on outcomes and Worker errors.
+Output-callback/structured-clone exceptions reject its Promise after termination.
 
 With a relay, Host preparation fetches `/roots` using the same token query: a JSON array
 of base64 DER certificates from the relay machine's existing `nodeTrustStore` adapter
 (including its documented Node fallback, D24). An explicit `roots` array overrides this.
 Without a relay or explicit roots the system-root list is empty. TLS verification is
 never disabled. These are **not the browser's roots** (D44).
+
+## Wasm child commands and streaming input
+
+These are optional **browser extensions**, not native moonrun process behavior (D45–D46).
+No command registry, package resolver, network fetcher or application UI is included.
+
+```ts
+const running = runInWorker({
+  wasm: shellBytes,
+  name: 'sh',
+  args: ['-i'],
+  stdin: 'stream',
+  // Executed on the main thread. The embedder supplies all resolution and loading.
+  resolveCommand: async (program, args, { cwd, env }) =>
+    resolveProvidedWasm(program, args, { cwd, env }),
+  stdout: consumeStdoutBytes,
+  stderr: consumeStderrBytes,
+});
+await running.write(new TextEncoder().encode('echo hello | tr a-z A-Z\n'));
+// Later, when input is finished:
+running.end();
+const outcome = await running;
+```
+
+`resolveCommand(program, args, {cwd, env})` returns a Promise of wasm bytes, a compiled
+`WebAssembly.Module`, or `undefined`. `program` is exactly the guest's request, `args`
+excludes argv[0], cwd is an existing absolute directory, and env is the child's complete
+snapshot (first repeated key wins). The callback owns PATH/catalog policy: the Host does
+not search, fetch or cache commands. `undefined` gives ENOENT; cli/sh prints
+`sh: OSError("@process.run(): No such file or directory")` and sets status 127, exactly
+as with a missing native command. A callback rejection gives EIO. If passing a Module,
+the embedder should compile with MoonBit's js-string builtins/options when needed;
+bytes go through the existing compatibility compiler. Without a resolver, process
+spawn/kill/policy-transfer continue to return ENOSYS.
+
+Resolved commands execute as separate Runs **inside the same Worker**. Each gets its
+spawn argv[0], args, environment, cwd view, diagnostics and kernel state; inodes and
+open-file descriptions are shared through the memory VFS. Duplicated file descriptors
+share offsets and survive parent closure. Components and trust roots are reused.
+Nested children use the same resolver. Pids increase from 1 within each Worker and
+are synthetic; no OS processes are created.
+
+The existing kernel owns spawn/wait jobs, pid handles, cancellation, pipe readiness and
+Linux-style error conversion. Child async stdout/stderr use ordinary kernel pipes and
+the existing `feedChild` / `drainChild` bridges; a full pipe blocks the producer, and a
+closed reader gives EPIPE. Merged stdout/stderr share a pipe and preserve write order.
+Legacy/WASI output imports may also suspend for host-pipe backpressure. Guest wasm
+start sections cannot suspend (ordinary `_start` exports can). File redirection and
+inherited stdio work without exposing another Run's kernel handles. Extra inherited
+fds/policy transfers remain unsupported; this is not an OS process sandbox or a complete
+POSIX process environment.
+
+| Child outcome | Process result |
+|---|---|
+| completed | exit 0 |
+| exited | low 8 bits of exit code |
+| guest trap, host/compile failure | exit 1 (matching the Node CLI) |
+| moonrun panic/leak outcome | exit 101 |
+| signaled | the signal number; the existing kernel reports its negation |
+
+The kernel's process result is an exit code or negative signal, as in moonrun's process
+API, rather than a raw packed `waitpid` word. Output is drained before publishing normal
+child exit; forced termination may discard pending output. The top Run owns the Worker
+process tree: when it finishes, remaining wasm children are stopped and a late resolver
+result cannot create an orphan Run. Detached/background lifetimes across top Runs are
+not supported.
+
+`write(bytes)` copies its input and returns a Promise for input capacity. Await it for
+backpressure; messages are serialized in chunks of at most 64 KiB. It is usable while
+components are loading. `end()` follows previously queued writes and delivers EOF.
+With no `stdin: 'stream'`, the old finite input/EOF behavior is unchanged. Async stdin
+jobs wait without blocking the Worker. **Legacy/WASI synchronous stdin cannot wait**:
+it consumes bytes already available and returns EOF when empty; interactive programs
+must use async stdin. The lower-level equivalent is `createBrowserHost({stdin: new
+BrowserStdin(), resolveCommand})` followed by `host.run(bytesOrModule, {name, args})`;
+feed its input with `BrowserStdin.write/end`. A Host is a per-top-Run view; create a fresh
+one for another run. Core `run(loaded, host, options)` remains available for finite input,
+but use `host.run` for this extension's signal/lifetime handling.
+
+`running.signal(2)` (or `host.signal(2)`) delivers SIGINT to the top Run's existing signal
+capture/cancellation machinery. A shell's process cancellation stops its foreground
+child through the existing process jobs; in cli/sh 0.2.1 this ends the shell Run with
+signal 2 too. This is **not** terminal job control: SignalPort has no foreground process
+group, tty or job-selection operation, so a generic helper cannot send Ctrl-C only to an
+arbitrary foreground pipeline while keeping its shell alive. Lower-level embedders with
+a known child pid can use `host.process.kill(pid, signal)` (1/2/9/15; 0 probes existence).
+Signals are cooperative at imports/suspension points; code that never yields or calls
+imports blocks the shared Worker and cannot be preempted by a message. Terminating the
+Worker externally stops the entire tree, rather than an individual wasm child.
 
 ## Relay protocol: `moonrun-tcp-v1`
 
@@ -113,15 +203,15 @@ never unwraps TLS. Listen/accept, UDP and network interface enumeration are unav
 
 Pure computation, core/legacy output, args/env, finite stdin, ordinary memory filesystem
 I/O, async timers, and SQLite using the same synchronous VFS are supported. Filesystem
-watching, external processes, OS signals, listeners, UDP, persistent storage and access
-to host files are unavailable. Paths are UTF-8 strings, metadata is synthetic, files are
+watching, native processes, OS/tty signals, listeners, UDP, persistent storage and access
+to host files are unavailable; optional wasm processes and virtual signals are described above. Paths are UTF-8 strings, metadata is synthetic, files are
 limited to 64 MiB, and directory order is insertion order (D41–D44).
 
 Expected skill cases: kbbi/discord-cli `--help` and discord-cli's no-token error require
 no network. kbbi lookup, discord-cli API calls and web-fetch of `https://example.com`
 should work through the default allowlist and relay roots; other web-fetch destinations
-need `--allow`. Skills that launch programs or require UDP/listeners/host files do not
-work here. This is expected coverage, **not a Chrome test result**.
+need `--allow`. Skills that launch provided wasm commands can use the resolver; native binaries,
+UDP/listeners and host files remain unavailable. This is expected coverage, **not a Chrome test result**.
 
 Node/vitest tests cover VFS contracts, DNS aliases, relay authentication and destination
 rejection, opaque data and FIN, EAGAIN/drain, receive credit, component preparation,
@@ -129,3 +219,9 @@ guest args/env/stdio/exit, SQLite commits and reopen, and the real Worker entry 
 `pnpm build` traverses emitted browser dependencies, rejects Node and bare imports and
 checks wasm/Worker assets. Chrome verification is left to the coordinator; no browser
 or persistent demo server is started as part of implementation verification.
+
+The shell tests download cli/sh and cli/tr 0.2.1 only into `.cache/browser-shell/` and
+verify fixed SHA-256 digests on every use. Tests compare pipelines, missing-command
+messages/status, nested sh and interactive output with the Node CLI using native host
+commands. Additional tests cover large pipeline backpressure, cwd/env/file redirection,
+merged output, precompiled children, traps/compile failures, kill/wait and SIGINT.

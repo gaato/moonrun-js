@@ -196,6 +196,70 @@ export class MemoryVfs {
     };
   }
 
+  /** Separate cwd with the same inodes and open-file descriptions. */
+  view(cwd: string): { fs: FsPort; files: FilePort } {
+    const canonical = this.files.realpath(cwd);
+    if (!canonical.ok) throw new VfsError(canonical.error.code);
+    const kind = this.fs.kind(canonical.value);
+    if (!kind.ok || kind.value !== 'dir') throw new VfsError('ENOTDIR');
+    const at = (p: string): string => (p.startsWith('/') ? p : `${canonical.value}/${p}`);
+    const f = this.files;
+    const a = f.async;
+    return {
+      fs: {
+        cwd: () => ok(canonical.value),
+        resolve: (p) => this.fs.resolve(at(p)),
+        readFile: (p) => this.fs.readFile(at(p)),
+        writeFile: (p, b) => this.fs.writeFile(at(p), b),
+        mkdirAll: (p) => this.fs.mkdirAll(at(p)),
+        readDir: (p) => this.fs.readDir(at(p)),
+        removeFile: (p) => this.fs.removeFile(at(p)),
+        removeDirAll: (p) => this.fs.removeDirAll(at(p)),
+        kind: (p) => this.fs.kind(at(p)),
+      },
+      files: {
+        ...f,
+        open: (p, flags) => f.open(at(p), flags),
+        stat: (p) => f.stat(at(p)),
+        lstat: (p) => f.lstat(at(p)),
+        readDir: (p) => f.readDir(at(p)),
+        readLink: (p) => f.readLink(at(p)),
+        symlink: (target, p) => f.symlink(target, at(p)),
+        rename: (x, y) => f.rename(at(x), at(y)),
+        mkdir: (p, mode) => f.mkdir(at(p), mode),
+        rmdir: (p) => f.rmdir(at(p)),
+        unlink: (p) => f.unlink(at(p)),
+        access: (p, mode) => f.access(at(p), mode),
+        realpath: (p) => f.realpath(at(p)),
+        async: {
+          ...a,
+          open: async (p, flags) => a.open(at(p), flags),
+          openPath: (p) => a.openPath(at(p)),
+          statAt: async (fd, p, follow) => a.statAt(fd, fd === undefined ? at(p) : p, follow),
+          access: async (p, mode) => a.access(at(p), mode),
+          chmod: async (p, mode) => a.chmod(at(p), mode),
+          unlink: async (p) => a.unlink(at(p)),
+          rmdir: async (p) => a.rmdir(at(p)),
+          mkdir: async (p, m) => a.mkdir(at(p), m),
+          rename: async (x, y) => a.rename(at(x), at(y)),
+          symlink: async (t, p) => a.symlink(t, at(p)),
+          realpath: async (p) => a.realpath(at(p)),
+          watch: (p, listener) => a.watch(at(p), listener),
+        },
+      },
+    };
+  }
+
+  /** dup shares the offset but owns a separately closeable descriptor. */
+  duplicate(fd: HostFd): Result<HostFd, HostError> {
+    return attempt(() => {
+      const description = this.#descriptor(fd);
+      const copy = this.#fd++ as HostFd;
+      this.#fds.set(copy, description);
+      return copy;
+    });
+  }
+
   #now(): bigint {
     return BigInt(Date.now()) * 1_000_000n;
   }

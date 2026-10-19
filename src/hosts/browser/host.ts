@@ -2,9 +2,14 @@ import { Diagnostics } from '../../diagnostics/diag.ts';
 import { DIAGNOSTICS_URL } from '../../diagnostics/diag-url.ts';
 import { POLICY_URL } from '../../domains/policy/policy-url.ts';
 import { TLS_ENGINE_URL } from '../../domains/tls/engine-url.ts';
+import type { RunOutcome } from '../../engine/run.ts';
 import type { Host } from '../../ports/host.ts';
-import { err, ok } from '../../ports/result.ts';
+import type { SpawnRequest } from '../../ports/process.ts';
+import { ok } from '../../ports/result.ts';
 import { BrowserDns, browserNet } from './net.ts';
+import { allocatePid, browserProcess, childEnvironment, type ResolveCommand } from './process.ts';
+import { BrowserControl, runBrowserGuest } from './runtime.ts';
+import { type BrowserIo, BrowserStdin, callbackWriter } from './streams.ts';
 import { type BrowserFiles, MemoryVfs } from './vfs.ts';
 
 export interface BrowserHostOptions {
@@ -14,7 +19,8 @@ export interface BrowserHostOptions {
   readonly stdout?: (bytes: Uint8Array) => void;
   readonly stderr?: (bytes: Uint8Array) => void;
   /** A synchronous byte source (read into the buffer, return count), or finite input. Default EOF. */
-  readonly stdin?: Uint8Array | ((buffer: Uint8Array) => number);
+  readonly stdin?: Uint8Array | BrowserStdin | ((buffer: Uint8Array) => number);
+  readonly resolveCommand?: ResolveCommand;
   /** WebSocket URL, including any relay authentication query. No relay means ENOSYS. */
   readonly relay?: string;
   /** DER roots for TrustSystemRoot. By default fetch the relay's /roots endpoint, or use none. */
@@ -22,6 +28,12 @@ export interface BrowserHostOptions {
 }
 export interface BrowserHost extends Host {
   readonly diagnostics: Diagnostics;
+  run(
+    wasm: Uint8Array | WebAssembly.Module,
+    options?: { readonly name?: string; readonly args?: readonly string[] },
+  ): Promise<RunOutcome>;
+  /** Deliver to this Run; the shell's cancellation handlers manage its foreground process. */
+  signal(signal: number): void;
 }
 async function compile(url: URL): Promise<WebAssembly.Module> {
   const response = await fetch(url);
@@ -51,74 +63,139 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     options.roots === undefined ? relayRoots(options.relay) : Promise.resolve(options.roots),
   ]);
   const vfs = new MemoryVfs(options.files, options.cwd);
-  const env = new Map(Object.entries(options.env ?? {}));
-  const dns = new BrowserDns();
-  let offset = 0;
+  const tree = { controls: new Map<number, BrowserControl>(), closed: false };
   const source = options.stdin;
+  let offset = 0;
   const read = (buffer: Uint8Array): number => {
     if (typeof source === 'function') return source(buffer);
-    const bytes = source?.subarray(offset, offset + buffer.length);
+    const bytes =
+      source instanceof Uint8Array ? source.subarray(offset, offset + buffer.length) : undefined;
     if (bytes === undefined) return 0;
     buffer.set(bytes);
     offset += bytes.length;
     return bytes.length;
   };
-  return {
-    diagnostics: new Diagnostics(diag, {
-      readFile: (p) => {
-        const r = vfs.fs.readFile(p);
-        return r.ok ? r.value : undefined;
-      },
-    }),
-    stdio: {
-      writeStdout: (bytes) => options.stdout?.(bytes.slice()),
-      writeStderr: (bytes) => options.stderr?.(bytes.slice()),
-      readStdin: read,
-      readStdinAsync: async (buffer) => read(buffer),
-    },
-    env: {
-      get: (key) => env.get(key),
-      entries: () => [...env],
-      set: (k, v) => {
-        env.set(k, v);
-      },
-      unset: (k) => {
-        env.delete(k);
-      },
-    },
-    clock: {
-      nowMs: () => Date.now(),
-      monotonicNs: () => BigInt(Math.floor(performance.now() * 1e6)),
-    },
-    random: {
-      fill: (buffer) => {
-        for (let offset = 0; offset < buffer.length; offset += 65536)
-          crypto.getRandomValues(buffer.subarray(offset, offset + 65536));
-      },
-    },
-    fs: vfs.fs,
-    files: vfs.files,
-    dns,
-    net: browserNet(dns, options.relay),
-    components: {
-      policy: () => ok(policy),
-      tlsEngine: () => ok(tls),
-      sqliteEngine: () => ok(sqlite),
-    },
-    process: {
-      spawn: async () => err({ code: 'ENOSYS' }),
-      kill: () => err({ code: 'ENOSYS' }),
-      openPolicyTransfer: () => err({ code: 'ENOSYS' }),
-      closeFd: () => {},
-    },
-    // SignalPort cannot return errors. Capture is inert (the existing NO_SIGNALS convention).
-    signals: {
-      capture: () => () => {},
-      raise: () => {
-        throw Object.assign(new Error('browser signals: ENOSYS'), { code: 'ENOSYS' });
-      },
-    },
-    trustStore: { systemRoots: () => ok(roots) },
-    platform: { currentExe: undefined, pid: 0 },
+  const rootIo: BrowserIo = {
+    stdin: source instanceof BrowserStdin ? source : { read, readAsync: async (b) => read(b) },
+    stdout: callbackWriter((b) => options.stdout?.(b.slice())),
+    stderr: callbackWriter((b) => options.stderr?.(b.slice())),
   };
+  const make = (
+    io: BrowserIo,
+    cwd: string,
+    initialEnv: Readonly<Record<string, string>>,
+    control: BrowserControl,
+    pid: number,
+    child: boolean,
+  ): BrowserHost => {
+    const view = vfs.view(cwd);
+    const fstat = (fd: Parameters<typeof view.files.fstat>[0]) => {
+      if (fd < 0 || fd > 2) return view.files.fstat(fd);
+      const base = view.files.stat('/');
+      return base.ok
+        ? ok({ ...base.value, kind: 'other' as const, mode: 0o010666n, ino: BigInt(fd), size: 0n })
+        : base;
+    };
+    const files = {
+      ...view.files,
+      fstat,
+      async: { ...view.files.async, fstat: async (fd: Parameters<typeof fstat>[0]) => fstat(fd) },
+    };
+    const env = new Map(Object.entries(initialEnv));
+    const dns = new BrowserDns();
+    const host: BrowserHost = {
+      diagnostics: new Diagnostics(diag, {
+        readFile: (p) => {
+          const r = view.fs.readFile(p);
+          return r.ok ? r.value : undefined;
+        },
+      }),
+      run: async (wasm, runOptions = {}) => {
+        try {
+          return await runBrowserGuest(
+            wasm,
+            runOptions.name ?? '/work/program.wasm',
+            runOptions.args ?? [],
+            host,
+            control,
+            child ? io : undefined,
+          );
+        } finally {
+          if (!child) {
+            tree.closed = true;
+            for (const [key, active] of tree.controls) if (key !== pid) active.stop(9);
+            tree.controls.clear();
+          }
+        }
+      },
+      signal: (signal) => control.send(signal),
+      stdio: {
+        writeStdout: (b) => {
+          io.stdout.write(b);
+        },
+        writeStderr: (b) => {
+          io.stderr.write(b);
+        },
+        readStdin: (b) => io.stdin.read(b),
+        readStdinAsync: async (b) => io.stdin.readAsync(b, control.abort.signal),
+      },
+      env: {
+        get: (k) => env.get(k),
+        entries: () => [...env],
+        set: (k, v) => {
+          env.set(k, v);
+        },
+        unset: (k) => {
+          env.delete(k);
+        },
+      },
+      clock: {
+        nowMs: () => Date.now(),
+        monotonicNs: () => BigInt(Math.floor(performance.now() * 1e6)),
+      },
+      random: {
+        fill: (b) => {
+          for (let i = 0; i < b.length; i += 65536)
+            crypto.getRandomValues(b.subarray(i, i + 65536));
+        },
+      },
+      fs: view.fs,
+      files,
+      dns,
+      net: browserNet(dns, options.relay),
+      components: {
+        policy: () => ok(policy),
+        tlsEngine: () => ok(tls),
+        sqliteEngine: () => ok(sqlite),
+      },
+      get process() {
+        return port;
+      },
+      signals:
+        options.resolveCommand !== undefined || source instanceof BrowserStdin
+          ? control.signals
+          : {
+              capture: () => () => {},
+              raise: () => {
+                throw Object.assign(new Error('browser signals: ENOSYS'), { code: 'ENOSYS' });
+              },
+            },
+      trustStore: { systemRoots: () => ok(roots) },
+      platform: { currentExe: undefined, pid },
+    };
+    const port = browserProcess({
+      resolver: options.resolveCommand,
+      parent: host,
+      io,
+      vfs,
+      tree,
+      child: (request: SpawnRequest, streams: BrowserIo, next: BrowserControl, childPid: number) =>
+        make(streams, request.cwd ?? cwd, childEnvironment(request.env), next, childPid, true),
+    });
+    return host;
+  };
+  const control = new BrowserControl();
+  const pid = allocatePid();
+  tree.controls.set(pid, control);
+  return make(rootIo, options.cwd ?? '/work', options.env ?? {}, control, pid, false);
 }

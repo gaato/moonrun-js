@@ -1,44 +1,113 @@
 import type { RunOutcome } from '../../engine/run.ts';
-import type { BrowserRunRequest, WorkerReply } from './execute.ts';
+import type { BrowserRunRequest, WorkerMessage, WorkerReply } from './execute.ts';
+import type { ResolveCommand } from './process.ts';
 
 export type { RunOutcome } from '../../engine/run.ts';
 export type { BrowserRunRequest } from './execute.ts';
 export { type BrowserHost, type BrowserHostOptions, createBrowserHost } from './host.ts';
+export type { CommandContext, ResolveCommand } from './process.ts';
+export { BrowserStdin } from './streams.ts';
 export type { BrowserFiles } from './vfs.ts';
 
-// Keep DOM declarations local: lib.dom would override the core's Wasm GC/JSPI typings.
 interface ModuleWorker {
   onmessage: ((event: { readonly data: WorkerReply }) => void) | null;
   onerror: ((event: { readonly message: string }) => void) | null;
   onmessageerror: (() => void) | null;
-  postMessage(value: BrowserRunRequest): void;
+  postMessage(value: WorkerMessage): void;
   terminate(): void;
 }
 const web = globalThis as unknown as {
   Worker: new (url: URL, options: { type: 'module' }) => ModuleWorker;
 };
-
-export interface WorkerRunOptions extends BrowserRunRequest {
+export interface WorkerRunOptions
+  extends Omit<BrowserRunRequest, 'stdin' | 'commands' | 'streaming'> {
+  readonly stdin?: Uint8Array | 'stream';
+  readonly resolveCommand?: ResolveCommand;
   readonly stdout?: (bytes: Uint8Array) => void;
   readonly stderr?: (bytes: Uint8Array) => void;
 }
-/** A fresh module Worker per run. Streams bytes and terminates the Worker on every outcome. */
-export function runInWorker(options: WorkerRunOptions): Promise<RunOutcome> {
-  return new Promise((resolve, reject) => {
+/** Still awaitable as before; input methods are available immediately, before preparation finishes. */
+export interface BrowserRunHandle extends Promise<RunOutcome> {
+  write(bytes: Uint8Array): Promise<void>;
+  end(): void;
+  signal(signal: number): void;
+}
+export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
+  let write: BrowserRunHandle['write'] = async () => {
+    throw new Error('Worker unavailable');
+  };
+  let end = (): void => {};
+  let signal = (_signal: number): void => {};
+  const promise = new Promise<RunOutcome>((resolve, reject) => {
     const worker = new web.Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
-    const finish = (outcome: RunOutcome): void => {
+    let done = false;
+    let ended = false;
+    let id = 0;
+    let writeTail = Promise.resolve();
+    const inputs = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+    const stop = (): void => {
+      done = true;
       worker.terminate();
-      resolve(outcome);
+      for (const input of inputs.values()) input.reject(new Error('Run has ended'));
+      inputs.clear();
     };
-    worker.onmessage = (event: { readonly data: WorkerReply }) => {
-      try {
-        const reply = event.data;
-        if (reply.type === 'outcome') finish(reply.outcome);
-        else if (reply.type === 'stdout') options.stdout?.(reply.bytes);
-        else options.stderr?.(reply.bytes);
-      } catch (e) {
-        worker.terminate();
+    const finish = (outcome: RunOutcome): void => {
+      if (!done) {
+        stop();
+        resolve(outcome);
+      }
+    };
+    const failure = (e: unknown): void => {
+      if (!done) {
+        stop();
         reject(e);
+      }
+    };
+    worker.onmessage = ({ data: reply }) => {
+      try {
+        switch (reply.type) {
+          case 'outcome':
+            finish(reply.outcome);
+            break;
+          case 'stdout':
+            options.stdout?.(reply.bytes);
+            break;
+          case 'stderr':
+            options.stderr?.(reply.bytes);
+            break;
+          case 'input-ack':
+            inputs.get(reply.id)?.resolve();
+            inputs.delete(reply.id);
+            break;
+          case 'resolve': {
+            void (async () => {
+              try {
+                const wasm = await options.resolveCommand?.(
+                  reply.program,
+                  reply.args,
+                  reply.context,
+                );
+                if (!done)
+                  worker.postMessage({ type: 'resolved', id: reply.id, wasm, failed: false });
+              } catch {
+                try {
+                  if (!done)
+                    worker.postMessage({
+                      type: 'resolved',
+                      id: reply.id,
+                      wasm: undefined,
+                      failed: true,
+                    });
+                } catch (e) {
+                  failure(e);
+                }
+              }
+            })();
+            break;
+          }
+        }
+      } catch (e) {
+        failure(e);
       }
     };
     worker.onerror = (event) =>
@@ -51,12 +120,63 @@ export function runInWorker(options: WorkerRunOptions): Promise<RunOutcome> {
         kind: 'host-failure',
         failure: { chain: ['browser Worker message could not be cloned'] },
       });
-    const { stdout: _stdout, stderr: _stderr, ...request } = options;
+    write = (bytes) => {
+      if (done || ended || options.stdin !== 'stream')
+        return Promise.reject(new Error('stdin is not open for streaming'));
+      const copy = bytes.slice();
+      const queued = writeTail.then(async () => {
+        for (let offset = 0; offset < copy.length; offset += 65536) {
+          if (done) throw new Error('Run has ended');
+          const key = ++id;
+          await new Promise<void>((resolve, reject) => {
+            inputs.set(key, { resolve, reject });
+            worker.postMessage({
+              type: 'input',
+              id: key,
+              bytes: copy.slice(offset, offset + 65536),
+            });
+          });
+        }
+      });
+      writeTail = queued.catch(() => {});
+      return queued;
+    };
+    end = () => {
+      if (ended) return;
+      ended = true;
+      void writeTail
+        .then(() => {
+          if (!done) worker.postMessage({ type: 'input-end' });
+        })
+        .catch(failure);
+    };
+    signal = (s) => {
+      if (!done) worker.postMessage({ type: 'signal', signal: s });
+    };
+    const {
+      stdout: _stdout,
+      stderr: _stderr,
+      resolveCommand: resolver,
+      stdin,
+      ...request
+    } = options;
     try {
-      worker.postMessage(request);
+      worker.postMessage({
+        type: 'run',
+        request: {
+          ...request,
+          ...(stdin instanceof Uint8Array ? { stdin } : {}),
+          streaming: stdin === 'stream',
+          commands: resolver !== undefined,
+        },
+      });
     } catch (e) {
-      worker.terminate();
-      reject(e);
+      failure(e);
     }
+  });
+  return Object.assign(promise, {
+    write: (b: Uint8Array) => write(b),
+    end: () => end(),
+    signal: (s: number) => signal(s),
   });
 }
