@@ -46,6 +46,22 @@ are compiled to wasm and shipped with the package, as are a rustls TLS engine an
 `moonrun-js` exports `compileBytes` and `run`, and `moonrun-js/node` exports `nodeHost`. This
 API is not stable yet.
 
+## Browser
+
+A Web API host and dedicated Worker runner are exported from `moonrun-js/browser`.
+From a checkout, start the local demo with:
+
+```fish
+mise exec -- pnpm demo:browser
+```
+
+Open the printed localhost URL in Chrome, select a wasm, enter arguments and Run.
+Output streams as bytes; files live in memory under `/work`. HTTPS uses rustls over a
+localhost WebSocket relay with an explicit destination allowlist and the relay machine's
+roots. Processes, OS signals, listeners, UDP and persistent files are unavailable.
+See [browser setup, embedding and relay protocol](docs/browser.md). Chrome verification
+is pending; automated coverage runs under Node without a browser.
+
 ## Development
 
 See [AGENTS.md](AGENTS.md) and [docs/plan.md](docs/plan.md). After cloning:

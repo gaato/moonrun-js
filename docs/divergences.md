@@ -44,6 +44,12 @@
 | D39 | Deno 2.9.7 の ctime は秒単位、mtime / atime は ms 精度。`timestamp_test.mbt` index 0 の「600ms 後の ctime 差が 500ms 超」は秒境界によって失敗する | node:fs と Deno.stat の両方で確認。公開 API にない ns 精度を時刻の推測や libc の statx で補わない。mtime の刻みは watcher の変化検出（D17）にも影響する |
 | D40 | Deno 2.9.7 の node:dgram は受信した IPv6 link-local peer の scope ID を失う | UDP receive bridge は hostname / port しか返さず、元の sockaddr の sin6_scope_id は復元できない。正しい scope を必要とする reconnect に影響する。送信先やローカルの interface から推測しない。上流の公開 API による scope 保持が必要。現在の multicast discovery テストは先に D33 で失敗するため、D40 を独立した失敗数として重複計上しない |
 
+
+| D41 | Browser の fs/files は Run ごとのメモリ VFS。cwd は `/work`、preload 可能、UTF-8 パスのみ、1 file 64 MiB 上限、metadata は合成値・ms 時刻・単一の更新時刻、dir 順は挿入順。watch は ENOSYS。permission bits は保存・access で検査するが、open では OS の所有者/ACL 判定をしない。永続化・ホスト filesystem は無し | Web API のみで同期 FilePort を提供。OPFS は対象外 |
+| D42 | Browser の process spawn / kill / policy transfer は ENOSYS。SignalPort の capture は既存 NO_SIGNALS と同じ inert な解除関数、raise は ENOSYS の host error。sigwait は OS signal を受信しない。pid=0、currentExe は無し | Process/Signal の Web API が無い。SignalPort は Result を返す契約ではないので既存 core を変えない |
+| D43 | Browser の net は relay 経由の TCP client のみ。listen/accept・UDP は ENOSYS、interfaces は空。DNS 名は 198.18.0.0/15 の Run 内 alias を返し、接続時に relay が実 DNS 解決。literal IP は割当済み alias と一致しない限り直結。local address は合成 127.0.0.1:0、peer は guest が指定した alias/IP。送信 64 KiB high-water + ack、受信 credit、relay の許可先・buffer limit・timeout の制約あり | ブラウザは任意 TCP/UDP を開けない。DNS の失敗時期と address-family の選択は本家と異なる。詳細は docs/browser.md |
+| D44 | Browser の TrustSystemRoot は relay の `/roots` から事前取得した host roots（D24 の fallback を含む）、または embedder の明示 DER roots。relay / 明示 roots が無ければ空。ブラウザ内蔵 trust store ではない | Web API はブラウザの root 一覧を公開しない。TLS は既存 rustls wasm 内で検証し、relay は暗号化バイトだけを運ぶ |
+
 P6 の測定上の注意:
 
 - D12: `--unordered` は protocol block 同士だけでなく、その中の result / start JSON 行も多重集合として比較する。重複・message・protocol 外の出力は保持する。signal の index 0 / 1 の入れ替わりを許すが、合否や出力を消さない。

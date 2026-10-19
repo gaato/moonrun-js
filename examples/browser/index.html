@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moonrun-js · Browser</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 64rem; margin: 3rem auto; padding: 0 1.5rem; }
+  h1 { margin-bottom: .25rem; }
+  p { line-height: 1.6; }
+  label { display: block; margin-top: 1rem; font-weight: 600; }
+  input, textarea, button { font: inherit; padding: .5rem; box-sizing: border-box; }
+  input[type=url], textarea { width: 100%; }
+  textarea { font-family: monospace; }
+  button { margin: 1rem 0; cursor: pointer; }
+  pre { background: light-dark(#f2f4f7, #171c24); padding: 1rem; min-height: 4rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #status { padding-left: 1rem; }
+  small { font-weight: normal; }
+</style>
+<h1>moonrun-js</h1>
+<p>Run a MoonBit wasm in a dedicated Worker. Files live in memory at <code>/work</code>.
+  TCP uses the local relay; HTTPS stays inside rustls wasm. Requires Chrome with JSPI.</p>
+<form id="run-form">
+  <label for="wasm">Guest .wasm file</label>
+  <input id="wasm" type="file" accept=".wasm,application/wasm">
+  <label for="url">Or wasm URL <small>(server must allow CORS; a selected file takes priority)</small></label>
+  <input id="url" type="url" placeholder="https://…/program.wasm">
+  <label for="args">Arguments <small>(JSON array, after argv[0]; no “--” separator)</small></label>
+  <textarea id="args" rows="2">["--help"]</textarea>
+  <label for="env">Environment <small>(JSON object)</small></label>
+  <textarea id="env" rows="2">{}</textarea>
+  <label for="files">Preload files in /work <small>(optional; file names are preserved)</small></label>
+  <input id="files" type="file" multiple>
+  <label for="stdin">Stdin <small>(UTF-8, EOF after this text)</small></label>
+  <textarea id="stdin" rows="2"></textarea>
+  <button id="run" type="submit">Run</button><output id="status" aria-live="polite">Ready</output>
+</form>
+<h2>stdout</h2><pre id="stdout"></pre>
+<h2>stderr</h2><pre id="stderr"></pre>
+<p>Process spawning, OS signals, listeners, UDP and persistent files are unavailable.
+  The default relay permits example.com:443, discord.com:443 and kbbi.kemendikdasmen.go.id:443.
+  Add destinations with <code>--allow host:port</code>. Reload this page to stop a guest that never finishes.</p>
+<script type="module" src="/examples/browser/demo.js"></script>
+</html>

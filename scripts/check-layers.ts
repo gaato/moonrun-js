@@ -34,9 +34,19 @@ const problems: string[] = [];
 for (const file of files(root)) {
   const from = layerOf(file);
   const text = readFileSync(file, 'utf8');
-  for (const m of text.matchAll(/(?:import|export)[^'"]*?from\s+['"](\.[^'"]+)['"]/g)) {
+  const browser = path.relative(root, file).startsWith(`hosts${path.sep}browser${path.sep}`);
+  // Static imports/re-exports, side-effect imports and literal dynamic imports.
+  for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)['"]([^'"]+)['"]/g)) {
     const spec = m[1] ?? '';
-    const to = layerOf(path.resolve(path.dirname(file), spec));
+    if (browser && spec.startsWith('node:')) {
+      problems.push(`${path.relative(root, file)}: browser host must not import node:`);
+    }
+    if (!spec.startsWith('.')) continue;
+    const target = path.resolve(path.dirname(file), spec);
+    const to = layerOf(target);
+    if (browser && path.relative(root, target).startsWith(`hosts${path.sep}node${path.sep}`)) {
+      problems.push(`${path.relative(root, file)}: browser host must not import hosts/node`);
+    }
     if (to === from || LEAVES.has(to)) {
       continue;
     }

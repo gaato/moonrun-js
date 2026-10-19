@@ -146,7 +146,13 @@ moonrun の Rust ソースのうち OS に触らない論理部分（ポリシ�
   - Bun conformance は 32 mismatch を分類し、28 stderr-only を D3 の限定正規化、1 stderr+exit を D37 の修正で解消。3 stdout-only は理由付きで残す（105/3/0/3）。Node/Deno は 108/3/0/0。CLI 22/22、live skills 6/6 は全 runtime で維持。
   - nightly の既知の差で新しい regression を見落とさないよう、`test/conformance/expected-differences.json` で runtime / invocation / test / target ごとの期待差分を固定。既定で読み、未登録の差と必須差分の消失は両方失敗にする。D39 の ctime だけは flaky を許す。既知差分だけなら CI は成功するが、raw 一致数と互換レベルの未達は変わらない。
   - suite の母数は子 runner の重複記録を除いた外側の 27 invocation。使う正規化の ID は D1・D3・D5・D12。Deno の外部 Module-only は D38 / Bun は D37、公開 API の制約は D33–D36・D39・D40 を参照。残る差を `docs/divergences.md` に記録し、終了条件の未達を明示する。
-- **P7（本計画の範囲外・任意）**: ブラウザアダプタ（メモリ VFS / OPFS、WebSocket 中継の NetPort、ホスト名を中継に渡すための偽 IP DNS）。workerd は専用コード（専用アダプタ・サブパス・文字列定数名前空間対応・静的 wasm import 分岐）を一切書かず、バンドル済み Module を `Engine.load` に渡して試し、どこまで動くかを記録するのみ。
+- **P7 ブラウザホスト（2026-10-19 実装、Chrome の実測は coordinator 待ち）**:
+  - `moonrun-js/browser`: Web API のみの Host、非同期 component 準備、専用 module Worker と `runInWorker`。メモリ VFS は preload / fd / symlink / SQLite の同期 I/O を扱う。OPFS は対象外。
+  - 偽 IP DNS と TCP client の WebSocket 中継。TLS は rustls wasm 内、roots は localhost relay の host store。process / UDP / listen / watch は ENOSYS、signal capture は既存の inert convention。D41–D44 に差を記録。
+  - `mise exec -- pnpm demo:browser` でビルドと localhost デモを起動。relay は token / same-origin / Host 検査と正確な接続先許可リストを持つ開発専用 script（ws は devDependency）。
+  - VFS / DNS / relay / guest / Worker の Node テストと browser bundle の依存・asset 検査を追加。ブラウザを使った検証は行わない。[利用方法・protocol・期待される skills](browser.md)。
+  - 自動検証: typecheck / lint / build（browser の node:・bare import と asset 検査を含む）成功、unit 422 passed / 1 skipped、moonrun-tests **108/3/0/0**、core wasm **131/131**（7874 tests 成功）。ログは `.cache/p7-*.log`。
+  - workerd の専用コードや検証はこの作業に含めない。
 
 ## P6 の測定結果（2026-10-19）
 
