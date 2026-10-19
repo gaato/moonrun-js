@@ -11,12 +11,7 @@
       "moon": {
         "project": "test_stack_trace",
         "artifact": "_build/wasm-gc/debug/test/main/main.internal_test.wasm",
-        "command": [
-          "test",
-          "--target",
-          "wasm-gc",
-          "--build-only"
-        ]
+        "command": ["test", "--target", "wasm-gc", "--build-only"]
       }
     },
     "cli_args": {
@@ -44,26 +39,14 @@
       "moon": {
         "project": "test_current_exe",
         "artifact": "_build/wasm/debug/test/main/main.blackbox_test.wasm",
-        "command": [
-          "test",
-          "main",
-          "--target",
-          "wasm",
-          "--build-only"
-        ]
+        "command": ["test", "main", "--target", "wasm", "--build-only"]
       }
     },
     "working_dir": {
       "moon": {
         "project": "test_working_directory_instances",
         "artifact": "_build/wasm/debug/test/moon/working_directory_instances/main/main.blackbox_test.wasm",
-        "command": [
-          "test",
-          "main",
-          "--target",
-          "wasm",
-          "--build-only"
-        ]
+        "command": ["test", "main", "--target", "wasm", "--build-only"]
       }
     },
     "engine_plain": {
@@ -98,25 +81,14 @@
       "moon": {
         "project": "test_engine_backend",
         "artifact": "_build/wasm-gc/debug/test/js_string/js_string.whitebox_test.wasm",
-        "command": [
-          "test",
-          "js_string",
-          "--target",
-          "wasm-gc",
-          "--build-only"
-        ]
+        "command": ["test", "js_string", "--target", "wasm-gc", "--build-only"]
       }
     },
     "engine_ffi_bytes": {
       "moon": {
         "project": "test_engine_backend",
         "artifact": "_build/wasm-gc/debug/build/ffi_bytes/ffi_bytes.wasm",
-        "command": [
-          "build",
-          "ffi_bytes",
-          "--target",
-          "wasm-gc"
-        ],
+        "command": ["build", "ffi_bytes", "--target", "wasm-gc"],
         "env": {
           "MOONC_INTERNAL_PARAMS": "use_ffi_bytes=1|"
         }
@@ -231,13 +203,7 @@
       "moon": {
         "project": "test_ambient_process_path",
         "artifact": "_build/wasm/debug/test/moon/ambient_process_path/main/main.blackbox_test.wasm",
-        "command": [
-          "test",
-          "main",
-          "--target",
-          "wasm",
-          "--build-only"
-        ]
+        "command": ["test", "main", "--target", "wasm", "--build-only"]
       }
     },
     "policy_fs_allow": {
@@ -323,98 +289,65 @@
       "area": "cli",
       "source": "test.rs:test_moonrun_version",
       "wasm": "cli_args",
-      "argv": [
-        "--version"
-      ],
-      "divergences": [
-        "D5"
-      ]
+      "argv": ["--version"],
+      "divergences": ["D5"]
     },
     {
       "id": "cli/help",
       "area": "cli",
       "source": "test.rs:test_moonrun_help_describes_policy_shape",
       "wasm": "cli_args",
-      "argv": [
-        "--help"
-      ],
-      "divergences": [
-        "D5"
-      ]
+      "argv": ["--help"],
+      "divergences": ["D5"]
     },
     {
       "id": "stack/default",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>"
-      ]
+      "argv": ["<wasm>"]
     },
     {
       "id": "stack/generic-int",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>",
-        "--",
-        "abort-generic-int"
-      ]
+      "argv": ["<wasm>", "--", "abort-generic-int"]
     },
     {
       "id": "stack/generic-tuple",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>",
-        "--",
-        "abort-generic-tuple"
-      ]
+      "argv": ["<wasm>", "--", "abort-generic-tuple"]
     },
     {
       "id": "stack/method",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>",
-        "--",
-        "abort-method"
-      ]
+      "argv": ["<wasm>", "--", "abort-method"]
     },
     {
       "id": "stack/closure",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>",
-        "--",
-        "abort-closure"
-      ]
+      "argv": ["<wasm>", "--", "abort-closure"]
     },
     {
       "id": "stack/panic-result",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>",
-        "--",
-        "panic-result"
-      ]
+      "argv": ["<wasm>", "--", "panic-result"]
     },
     {
       "id": "stack/no-stack-trace",
       "area": "stack",
       "source": "test.rs:test_moonrun_wasm_stack_trace",
       "wasm": "stack_trace",
-      "argv": [
-        "<wasm>",
-        "--no-stack-trace"
-      ]
+      "argv": ["<wasm>", "--no-stack-trace"]
     },
     {
       "id": "stack/test-block-closure",
@@ -452,28 +385,14 @@
       "area": "cli",
       "source": "test.rs:test_moon_run_with_cli_args",
       "wasm": "cli_args",
-      "argv": [
-        "<wasm>",
-        "--",
-        "中文",
-        "😄👍",
-        "hello",
-        "1242"
-      ]
+      "argv": ["<wasm>", "--", "中文", "😄👍", "hello", "1242"]
     },
     {
       "id": "cli-args/after-flag",
       "area": "cli",
       "source": "test.rs:test_moon_run_with_cli_args",
       "wasm": "cli_args",
-      "argv": [
-        "<wasm>",
-        "--no-stack-trace",
-        "--",
-        "--arg1",
-        "--arg2",
-        "arg3"
-      ]
+      "argv": ["<wasm>", "--no-stack-trace", "--", "--arg1", "--arg2", "arg3"]
     },
     {
       "id": "current-exe/plain",
@@ -546,11 +465,7 @@
       "area": "cli",
       "source": "test.rs:test_moonrun_exits_with_guest_exit_code",
       "wasm": "cli_args",
-      "argv": [
-        "<wasm>",
-        "--",
-        "exit-7"
-      ]
+      "argv": ["<wasm>", "--", "exit-7"]
     },
     {
       "id": "cwd/working-directory-first",
@@ -721,18 +636,11 @@
       "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
       "wasm": "sqlite_main",
       "seed": "sqlite_policy",
-      "dirs": [
-        "allowed",
-        "denied"
-      ],
+      "dirs": ["allowed", "denied"],
       "env": {
         "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
       },
-      "argv": [
-        "--policy",
-        "<cwd>/policy.toml",
-        "<wasm>"
-      ]
+      "argv": ["--policy", "<cwd>/policy.toml", "<wasm>"]
     },
     {
       "id": "sqlite/leak",
@@ -740,10 +648,7 @@
       "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
       "wasm": "sqlite_leak",
       "seed": "sqlite_policy",
-      "dirs": [
-        "allowed",
-        "denied"
-      ],
+      "dirs": ["allowed", "denied"],
       "env": {
         "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
       }
@@ -754,10 +659,7 @@
       "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
       "wasm": "sqlite_invalid_handle",
       "seed": "sqlite_policy",
-      "dirs": [
-        "allowed",
-        "denied"
-      ]
+      "dirs": ["allowed", "denied"]
     },
     {
       "id": "sqlite/entered-mutex",
@@ -765,10 +667,7 @@
       "source": "test.rs:test_moon_run_with_sqlite_ffi_imports",
       "wasm": "sqlite_entered_mutex",
       "seed": "sqlite_policy",
-      "dirs": [
-        "allowed",
-        "denied"
-      ]
+      "dirs": ["allowed", "denied"]
     },
     {
       "id": "async/stdio",
@@ -830,11 +729,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_fs_allow",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/policy.toml",
-        "<wasm>"
-      ],
+      "argv": ["--policy", "<cwd>/policy.toml", "<wasm>"],
       "env": {
         "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
       }
@@ -845,11 +740,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_env_get",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/policy.toml",
-        "<wasm>"
-      ]
+      "argv": ["--policy", "<cwd>/policy.toml", "<wasm>"]
     },
     {
       "id": "policy/env-mutate",
@@ -857,11 +748,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_env_mutate",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/policy.toml",
-        "<wasm>"
-      ]
+      "argv": ["--policy", "<cwd>/policy.toml", "<wasm>"]
     },
     {
       "id": "policy/process-env",
@@ -869,11 +756,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_process_env",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/policy.toml",
-        "<wasm>"
-      ],
+      "argv": ["--policy", "<cwd>/policy.toml", "<wasm>"],
       "env": {
         "MOONRUN_HIDDEN_ENV": "host secret"
       }
@@ -884,11 +767,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_process_env",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/process-any-args.toml",
-        "<wasm>"
-      ],
+      "argv": ["--policy", "<cwd>/process-any-args.toml", "<wasm>"],
       "env": {
         "MOONRUN_HIDDEN_ENV": "host secret"
       }
@@ -899,11 +778,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_env_get",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/deny-all.toml",
-        "<wasm>"
-      ],
+      "argv": ["--policy", "<cwd>/deny-all.toml", "<wasm>"],
       "env": {
         "MOONRUN_POLICY_ENV": "host value"
       }
@@ -914,11 +789,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_process_env",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/process-prefix-deny.toml",
-        "<wasm>"
-      ]
+      "argv": ["--policy", "<cwd>/process-prefix-deny.toml", "<wasm>"]
     },
     {
       "id": "policy/listen-implicit-bind-denied",
@@ -926,11 +797,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_listen",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/deny-all.toml",
-        "<wasm>"
-      ],
+      "argv": ["--policy", "<cwd>/deny-all.toml", "<wasm>"],
       "env": {
         "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
       }
@@ -941,11 +808,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_process_env",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/deny-all.toml",
-        "<wasm>"
-      ]
+      "argv": ["--policy", "<cwd>/deny-all.toml", "<wasm>"]
     },
     {
       "id": "policy/fs-deny-read",
@@ -953,11 +816,7 @@
       "source": "test.rs:test_moon_run_policy_with_workspace_async_fs",
       "wasm": "policy_fs_deny_read",
       "seed": "policy_workspace",
-      "argv": [
-        "--policy",
-        "<cwd>/policy.toml",
-        "<wasm>"
-      ],
+      "argv": ["--policy", "<cwd>/policy.toml", "<wasm>"],
       "env": {
         "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"
       }
@@ -967,9 +826,7 @@
       "area": "async-kernel",
       "source": "test.rs:test_moon_run_async_host_leak_check_env",
       "wasm": "async_leak_check",
-      "unsetEnv": [
-        "MOONBIT_ASYNC_CHECK_FD_LEAK"
-      ]
+      "unsetEnv": ["MOONBIT_ASYNC_CHECK_FD_LEAK"]
     },
     {
       "id": "async/leak-check-enabled",
@@ -1017,9 +874,7 @@
       "wasm": {
         "wat": "test/conformance/wat/js-string-trap.wat"
       },
-      "divergences": [
-        "D6"
-      ]
+      "divergences": ["D6"]
     },
     {
       "id": "outcomes/test-finish-trap",
@@ -1028,11 +883,7 @@
       "wasm": {
         "wat": "test/conformance/wat/test-finish-trap.wat"
       },
-      "argv": [
-        "--test-args",
-        "{\"package\":\"moon/core\",\"file_and_index\":[]}",
-        "<wasm>"
-      ]
+      "argv": ["--test-args", "{\"package\":\"moon/core\",\"file_and_index\":[]}", "<wasm>"]
     },
     {
       "id": "outcomes/test-execute-trap",
@@ -1099,11 +950,7 @@
       "wasm": {
         "wat": "test/conformance/wat/test-finish-host-error.wat"
       },
-      "argv": [
-        "--test-args",
-        "{\"package\":\"moon/core\",\"file_and_index\":[]}",
-        "<wasm>"
-      ]
+      "argv": ["--test-args", "{\"package\":\"moon/core\",\"file_and_index\":[]}", "<wasm>"]
     },
     {
       "id": "backends/spawn-stdio-handles-none-zero",
@@ -1303,11 +1150,7 @@
       "files": {
         "policy.toml": ""
       },
-      "argv": [
-        "<wasm>",
-        "--policy",
-        "<cwd>/policy.toml"
-      ],
+      "argv": ["<wasm>", "--policy", "<cwd>/policy.toml"],
       "note": "wasmtime-feature test; the reference binary is V8"
     },
     {
@@ -1340,11 +1183,7 @@
       "wasm": {
         "wat": "test/conformance/wat/bridge-test-finish-host-error.wat"
       },
-      "argv": [
-        "--test-args",
-        "{\"package\":\"moon/core\",\"file_and_index\":[]}",
-        "<wasm>"
-      ],
+      "argv": ["--test-args", "{\"package\":\"moon/core\",\"file_and_index\":[]}", "<wasm>"],
       "note": "wasmtime-feature test; the reference binary is V8"
     },
     {
@@ -1366,13 +1205,7 @@
       "files": {
         "policy.json": "{}"
       },
-      "argv": [
-        "--policy",
-        "<cwd>/policy.json",
-        "<wasm>",
-        "--",
-        "alpha"
-      ]
+      "argv": ["--policy", "<cwd>/policy.json", "<wasm>", "--", "alpha"]
     },
     {
       "id": "backends/wasi-proc-exit",

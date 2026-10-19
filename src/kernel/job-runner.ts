@@ -1,0 +1,247 @@
+import type { HostErrorCode } from '../ports/result.ts';
+import type { StdioPort } from '../ports/stdio.ts';
+import { type AsyncError, BADF, IO, native } from './errors.ts';
+import type { Job } from './job.ts';
+import type { PipeEnd } from './pipe.ts';
+import type { Scheduler, Timer } from './scheduler.ts';
+
+/** What running Jobs may use. */
+export interface JobEnvironment {
+  readonly scheduler: Scheduler;
+  readonly stdio: StdioPort;
+}
+
+/** A started Job. `done` is called exactly once, possibly before `startJob` returns. */
+export interface Execution {
+  /**
+   * The cancellation signal (moonrun's `SIGUSR2` to the worker thread). A blocked
+   * operation completes now (sleep with success, I/O with `EINTR`) and true is
+   * returned; false means the operation cannot be interrupted and will finish later.
+   */
+  interrupt(): boolean;
+}
+
+const FINISHED: Execution = { interrupt: () => false };
+const EINTR = native('EINTR');
+
+/** Maps an exception from a synchronous port call to the error a syscall would give. */
+function thrownError(e: unknown): AsyncError {
+  if (typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string') {
+    // Unknown codes surface as EIO when the ABI turns them into numbers.
+    return native(e.code as HostErrorCode);
+  }
+  return IO;
+}
+
+/** Starts `job` (moonrun `run_host_job`), writing `ret`/`err` and its payload result. */
+export function startJob(job: Job, env: JobEnvironment, done: () => void): Execution {
+  job.succeed(0);
+  const payload = job.payload;
+  switch (payload.kind) {
+    case 'failed':
+      job.fail(payload.error);
+      done();
+      return FINISHED;
+    case 'sleep':
+      return sleep(job, payload.ms, env.scheduler, done);
+    case 'stream-read':
+      return streamRead(job, payload, env, done);
+    case 'stream-write':
+      return streamWrite(job, payload, env, done);
+  }
+}
+
+/** `sleep_job_worker`: `nanosleep` outside a cancellable region, so a signal ends it early. */
+function sleep(job: Job, ms: number, scheduler: Scheduler, done: () => void): Execution {
+  let timer: Timer | undefined = scheduler.setTimer(Math.max(0, ms), () => {
+    timer = undefined;
+    done();
+  });
+  return {
+    interrupt: () => {
+      if (timer === undefined) {
+        return false;
+      }
+      timer.cancel();
+      timer = undefined;
+      job.succeed(0);
+      done();
+      return true;
+    },
+  };
+}
+
+type ReadPayload = Extract<Job['payload'], { kind: 'stream-read' }>;
+type WritePayload = Extract<Job['payload'], { kind: 'stream-write' }>;
+
+function streamRead(job: Job, payload: ReadPayload, env: JobEnvironment, done: () => void) {
+  const resource = payload.resource;
+  // Streams have no offset: pread/pwrite on a pipe or terminal fail with ESPIPE.
+  if (payload.position >= 0n) {
+    job.fail(native('ESPIPE'));
+    done();
+    return FINISHED;
+  }
+  switch (resource.kind) {
+    case 'stdio': {
+      if (resource.stream !== 0) {
+        job.fail(BADF);
+      } else {
+        const buffer = new Uint8Array(payload.len);
+        try {
+          const n = env.stdio.readStdin(buffer);
+          payload.result = buffer.subarray(0, n);
+          job.succeed(n);
+        } catch (e) {
+          job.fail(thrownError(e));
+        }
+      }
+      done();
+      return FINISHED;
+    }
+    case 'pipe':
+      return pipeRead(job, payload, resource.end, done);
+    case 'invalid':
+    case 'completion-source':
+      job.fail(BADF);
+      done();
+      return FINISHED;
+  }
+}
+
+/** A blocking `read`: waits (cancellably) until data or end of file. */
+function pipeRead(job: Job, payload: ReadPayload, end: PipeEnd, done: () => void): Execution {
+  const buffer = new Uint8Array(payload.len);
+  let unwatch: (() => void) | undefined;
+  const attempt = (): boolean => {
+    const r = end.read(buffer);
+    if (!r.ok && r.error === 'EAGAIN') {
+      return false;
+    }
+    if (r.ok) {
+      payload.result = buffer.subarray(0, r.value);
+      job.succeed(r.value);
+    } else {
+      job.fail(native(r.error));
+    }
+    return true;
+  };
+  if (attempt()) {
+    done();
+    return FINISHED;
+  }
+  unwatch = end.watch(() => {
+    if (unwatch !== undefined && attempt()) {
+      unwatch();
+      unwatch = undefined;
+      done();
+    }
+  });
+  return {
+    interrupt: () => {
+      if (unwatch === undefined) {
+        return false;
+      }
+      unwatch();
+      unwatch = undefined;
+      job.fail(EINTR);
+      done();
+      return true;
+    },
+  };
+}
+
+function streamWrite(job: Job, payload: WritePayload, env: JobEnvironment, done: () => void) {
+  const resource = payload.resource;
+  // Streams have no offset: pread/pwrite on a pipe or terminal fail with ESPIPE.
+  if (payload.position >= 0n) {
+    job.fail(native('ESPIPE'));
+    done();
+    return FINISHED;
+  }
+  switch (resource.kind) {
+    case 'stdio': {
+      try {
+        if (resource.stream === 1) {
+          env.stdio.writeStdout(payload.data);
+          job.succeed(payload.data.length);
+        } else if (resource.stream === 2) {
+          env.stdio.writeStderr(payload.data);
+          job.succeed(payload.data.length);
+        } else {
+          job.fail(BADF);
+        }
+      } catch (e) {
+        job.fail(thrownError(e));
+      }
+      done();
+      return FINISHED;
+    }
+    case 'pipe':
+      return pipeWrite(job, payload, resource.end, done);
+    case 'invalid':
+    case 'completion-source':
+      job.fail(BADF);
+      done();
+      return FINISHED;
+  }
+}
+
+/**
+ * A `write` from a worker thread: on a blocking end it does not return before
+ * everything is written (or the reader goes away); on a nonblocking end it waits
+ * for room once and returns what fitted, like `write_to_native_file`'s poll loop.
+ */
+function pipeWrite(job: Job, payload: WritePayload, end: PipeEnd, done: () => void): Execution {
+  const data = payload.data;
+  let written = 0;
+  let unwatch: (() => void) | undefined;
+  const attempt = (): boolean => {
+    for (;;) {
+      const r = end.write(data.subarray(written));
+      if (!r.ok) {
+        if (r.error === 'EAGAIN') {
+          return false;
+        }
+        if (written > 0) {
+          job.succeed(written);
+        } else {
+          job.fail(native(r.error));
+        }
+        return true;
+      }
+      written += r.value;
+      if (written >= data.length || end.nonblocking) {
+        job.succeed(written);
+        return true;
+      }
+    }
+  };
+  if (attempt()) {
+    done();
+    return FINISHED;
+  }
+  unwatch = end.watch(() => {
+    if (unwatch !== undefined && attempt()) {
+      unwatch();
+      unwatch = undefined;
+      done();
+    }
+  });
+  return {
+    interrupt: () => {
+      if (unwatch === undefined) {
+        return false;
+      }
+      unwatch();
+      unwatch = undefined;
+      if (written > 0) {
+        job.succeed(written);
+      } else {
+        job.fail(EINTR);
+      }
+      done();
+      return true;
+    },
+  };
+}

@@ -1,0 +1,428 @@
+import { err, type HostErrorCode, ok, type Result } from '../ports/result.ts';
+import type { StdioPort } from '../ports/stdio.ts';
+import { CBuffers } from './c-buffers.ts';
+import { CompletionSource } from './completion.ts';
+import { type AsyncError, BADF, FAULT, INVAL, IO, native } from './errors.ts';
+import { type Handle, Handles, HostKeys } from './handles.ts';
+import type { JobPayload } from './job.ts';
+import { makePipe } from './pipe.ts';
+import { Poller } from './poller.ts';
+import { EPOLLIN, EPOLLOUT, EPOLLRDHUP } from './readiness.ts';
+import { acquire, pollableOf, type Resource, ResourceTable, type StdioStream } from './resource.ts';
+import type { Scheduler } from './scheduler.ts';
+import { RunSignals } from './signals.ts';
+import { type CancellationOutcome, ThreadPool } from './thread-pool.ts';
+
+/** File types as `fstat` reports them (moonrun `kind_of_fd`). */
+export type FdKind =
+  | 'unknown'
+  | 'regular'
+  | 'directory'
+  | 'symlink'
+  | 'socket'
+  | 'pipe'
+  | 'block-device'
+  | 'char-device';
+
+export interface AsyncKernelOptions {
+  readonly stdio: StdioPort;
+  readonly scheduler: Scheduler;
+  /** `fstat` of a process standard stream. */
+  readonly stdioKind: (stream: StdioStream) => Result<FdKind, AsyncError>;
+}
+
+/** The thread pool's binding to one poll instance (moonrun `ThreadPoolRegistration`). */
+interface PoolRegistration {
+  readonly poll: Handle;
+  readonly source: CompletionSource;
+  readonly sourceHandle: Handle;
+  readonly sourceResource: Resource;
+}
+
+function syscallError(e: unknown): AsyncError {
+  if (typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string') {
+    return native(e.code as HostErrorCode);
+  }
+  return IO;
+}
+
+/**
+ * The Async Host of one Run: every `moonbitlang/async` object behind the shared
+ * handle namespace, plus the per-run errno. It mirrors moonrun's `AsyncHost`
+ * method by method; the ABI layer only decodes arguments and encodes results.
+ */
+export class AsyncKernel {
+  readonly keys = new HostKeys();
+  readonly resources: ResourceTable;
+  readonly cBuffers: CBuffers;
+  readonly pool: ThreadPool;
+  readonly signals = new RunSignals();
+  /** `errno` as `os_error/get_errno` reports it. */
+  errno = 0;
+  readonly #polls: Handles<Poller>;
+  readonly #options: AsyncKernelOptions;
+  #currentEventPoll: Handle | undefined;
+  #registration: PoolRegistration | undefined;
+
+  constructor(options: AsyncKernelOptions) {
+    this.#options = options;
+    // Construction order fixes the reserved handle values (invalid, stdin, stdout, stderr).
+    this.resources = new ResourceTable(this.keys);
+    this.cBuffers = new CBuffers(this.keys);
+    this.#polls = new Handles(this.keys, 'poll');
+    this.pool = new ThreadPool(this.keys, {
+      scheduler: options.scheduler,
+      stdio: options.stdio,
+    });
+  }
+
+  get scheduler(): Scheduler {
+    return this.#options.scheduler;
+  }
+
+  // ----- event bus -----
+
+  pollCreate(): Handle {
+    return this.#polls.insert(new Poller(this.#options.scheduler));
+  }
+
+  pollDestroy(handle: Handle): Result<void, AsyncError> {
+    const poller = this.#polls.remove(handle);
+    if (poller === undefined) {
+      return err(BADF);
+    }
+    if (this.#currentEventPoll === handle) {
+      this.#currentEventPoll = undefined;
+    }
+    if (this.#registration?.poll === handle) {
+      this.#unregisterPool(this.#registration);
+    }
+    poller.close();
+    return ok(undefined);
+  }
+
+  /** `event_bus/try_register`: 1 registered, 0 not pollable, error otherwise. */
+  pollRegister(bus: Handle, fd: Handle, readOnly: boolean): Result<0 | 1, AsyncError> {
+    const registered = this.#register(bus, fd, readOnly);
+    if (!registered.ok) {
+      return registered;
+    }
+    return ok(registered.value ? 1 : 0);
+  }
+
+  /** The pre-tri-state `event_bus/register`: an unpollable resource is `EPERM`. */
+  pollRegisterLegacy(bus: Handle, fd: Handle, readOnly: boolean): Result<void, AsyncError> {
+    const registered = this.#register(bus, fd, readOnly);
+    if (!registered.ok) {
+      return registered;
+    }
+    return registered.value ? ok(undefined) : err(native('EPERM'));
+  }
+
+  pollWait(bus: Handle, timeoutMs: number): Result<number | Promise<number>, AsyncError> {
+    const poller = this.#polls.get(bus);
+    if (poller === undefined) {
+      return err(BADF);
+    }
+    const count = poller.wait(timeoutMs);
+    if (typeof count === 'number') {
+      this.#currentEventPoll = bus;
+      return ok(count);
+    }
+    return ok(
+      count.then((n) => {
+        this.#currentEventPoll = bus;
+        return n;
+      }),
+    );
+  }
+
+  /** `event_bus/get_event`: the event's index in the last wait of `bus`. */
+  pollGetEvent(bus: Handle, index: number): Result<bigint, AsyncError> {
+    const poller = this.#polls.get(bus);
+    if (poller === undefined || this.#currentEventPoll !== bus) {
+      return err(BADF);
+    }
+    return index < poller.events.length ? ok(BigInt(index)) : err(FAULT);
+  }
+
+  /** The event at `event` (an index) of the last wait: its user data and epoll bits. */
+  event(event: bigint): Result<{ readonly data: bigint; readonly events: number }, AsyncError> {
+    if (event > 0xffff_ffffn) {
+      return err(FAULT);
+    }
+    const current = this.#currentEventPoll;
+    const poller = current === undefined ? undefined : this.#polls.get(current);
+    if (poller === undefined) {
+      return err(BADF);
+    }
+    const found = poller.events[Number(event)];
+    return found === undefined ? err(FAULT) : ok(found);
+  }
+
+  // ----- thread pool -----
+
+  initThreadPool(bus: Handle): Result<Handle, AsyncError> {
+    const poller = this.#polls.get(bus);
+    if (poller === undefined) {
+      return err(BADF);
+    }
+    if (this.#registration !== undefined) {
+      return err(INVAL);
+    }
+    const source = new CompletionSource();
+    const sourceResource: Resource = { kind: 'completion-source', source };
+    const sourceHandle = this.resources.insert(sourceResource);
+    // Level-triggered: readable for as long as completions are pending.
+    poller.register(sourceResource, source, EPOLLIN, 'level', sourceHandle);
+    this.#registration = { poll: bus, source, sourceHandle, sourceResource };
+    return ok(sourceHandle);
+  }
+
+  destroyThreadPool(): void {
+    this.signals.stop();
+    this.pool.destroyWorkers();
+    if (this.#registration !== undefined) {
+      this.#unregisterPool(this.#registration);
+    }
+  }
+
+  spawnWorker(completionId: number, job: Handle): Result<Handle, AsyncError> {
+    const registration = this.#registration;
+    if (registration === undefined) {
+      return err(BADF);
+    }
+    return this.pool.spawnWorker(completionId, job, { kind: 'pool', source: registration.source });
+  }
+
+  spawnWorkerWithPipe(
+    completionId: number,
+    job: Handle,
+    writer: Handle,
+  ): Result<Handle, AsyncError> {
+    const resource = this.resources.get(writer);
+    if (!resource.ok) {
+      return resource;
+    }
+    const value = resource.value;
+    if (value.kind !== 'pipe' || !value.asyncWriter) {
+      return err(INVAL);
+    }
+    return this.pool.spawnWorker(completionId, job, { kind: 'pipe', writer: value.end });
+  }
+
+  cancelWorkerWithRetry(worker: Handle): Result<CancellationOutcome, AsyncError> {
+    const registration = this.#registration;
+    if (registration === undefined) {
+      return err(BADF);
+    }
+    return this.pool.cancelWithRetry(worker, registration.source);
+  }
+
+  /** `fetch_completion/unix`: up to `max` completion ids (signals first). */
+  fetchCompletion(source: Handle, max: number): Result<number[], AsyncError> {
+    const registration = this.#registration;
+    if (registration === undefined || registration.sourceHandle !== source) {
+      return err(BADF);
+    }
+    return ok(max === 0 ? [] : registration.source.fetch(max));
+  }
+
+  /** `start_signal_handler`: needs the thread pool's Completion Source. */
+  startSignalHandler(): Result<void, AsyncError> {
+    if (this.#registration === undefined) {
+      return err(BADF);
+    }
+    this.signals.start(this.#registration.source);
+    return ok(undefined);
+  }
+
+  /** Makes a Job over a resource, acquiring it for the Job's lifetime. */
+  insertResourceJob(
+    fd: Handle,
+    make: (resource: Resource) => JobPayload,
+  ): Result<Handle, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    return ok(this.pool.insertJob(make(acquire(resource.value))));
+  }
+
+  // ----- resources -----
+
+  stdHandle(id: number): Result<Handle, AsyncError> {
+    if (id !== 0 && id !== 1 && id !== 2) {
+      return err(INVAL);
+    }
+    return ok(this.resources.stdioHandle(id));
+  }
+
+  /** `fd_util/pipe`: a read and a write handle; async ends start nonblocking. */
+  pipe(readAsync: boolean, writeAsync: boolean): [Handle, Handle] {
+    const [reader, writer] = makePipe(readAsync, writeAsync);
+    return [
+      this.resources.insert({ kind: 'pipe', end: reader, asyncWriter: false }),
+      this.resources.insert({ kind: 'pipe', end: writer, asyncWriter: writeAsync }),
+    ];
+  }
+
+  closeFd(fd: Handle): Result<void, AsyncError> {
+    const resource = this.resources.remove(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    for (const [, poller] of this.#polls.entries()) {
+      poller.unregister(resource.value);
+    }
+    if (this.#registration?.sourceHandle === fd) {
+      this.#unregisterPool(this.#registration);
+    }
+    return ok(undefined);
+  }
+
+  kindOfFd(fd: Handle): Result<FdKind, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    const value = resource.value;
+    switch (value.kind) {
+      case 'stdio':
+        return this.#options.stdioKind(value.stream);
+      case 'pipe':
+      case 'completion-source':
+        return ok('pipe');
+      case 'invalid':
+        return err(BADF);
+    }
+  }
+
+  setCloexec(fd: Handle): Result<void, AsyncError> {
+    const resource = this.resources.get(fd);
+    return resource.ok ? ok(undefined) : resource;
+  }
+
+  /** `io/read/unix`: one nonblocking `read(2)`. */
+  read(fd: Handle, dst: Uint8Array): Result<number, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    const value = resource.value;
+    switch (value.kind) {
+      case 'pipe': {
+        // A blocking end would block the whole Run in moonrun; report EAGAIN instead.
+        const r = value.end.read(dst);
+        return r.ok ? r : err(native(r.error));
+      }
+      case 'stdio':
+        if (value.stream !== 0) {
+          return err(native('EBADF'));
+        }
+        try {
+          return ok(this.#options.stdio.readStdin(dst));
+        } catch (e) {
+          return err(syscallError(e));
+        }
+      case 'completion-source':
+        return err(native('EAGAIN'));
+      case 'invalid':
+        return err(BADF);
+    }
+  }
+
+  /** `io/write/unix`: one nonblocking `write(2)`; stdio bypasses the line-buffered print path. */
+  write(fd: Handle, src: Uint8Array): Result<number, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    const value = resource.value;
+    switch (value.kind) {
+      case 'pipe': {
+        const r = value.end.write(src);
+        return r.ok ? r : err(native(r.error));
+      }
+      case 'stdio':
+        try {
+          if (value.stream === 1) {
+            this.#options.stdio.writeStdout(src);
+          } else if (value.stream === 2) {
+            this.#options.stdio.writeStderr(src);
+          } else {
+            return err(native('EBADF'));
+          }
+          return ok(src.length);
+        } catch (e) {
+          return err(syscallError(e));
+        }
+      case 'completion-source':
+        return err(native('EBADF'));
+      case 'invalid':
+        return err(BADF);
+    }
+  }
+
+  // ----- lifecycle -----
+
+  /** Run teardown: stop Workers and timers, close polls and guest-owned resources. */
+  teardown(): void {
+    this.destroyThreadPool();
+    for (const [handle] of [...this.#polls.entries()]) {
+      this.pollDestroy(handle);
+    }
+    this.resources.closeAll();
+    this.#options.scheduler.dispose();
+  }
+
+  /** Live async state, for `MOONBIT_ASYNC_CHECK_FD_LEAK` (moonrun `leak_summary`). */
+  leakSummary(): string | undefined {
+    const leaks: string[] = [];
+    const add = (name: string, count: number): void => {
+      if (count !== 0) {
+        leaks.push(`${name}=${count}`);
+      }
+    };
+    add('c_buffers', this.cBuffers.size);
+    add('jobs', this.pool.jobCount);
+    add('polls', this.#polls.size);
+    if (this.#registration !== undefined) {
+      leaks.push('completion_notifier=1', 'completion_source=1');
+    }
+    add('resources', this.resources.ownedCount - (this.#registration === undefined ? 0 : 1));
+    add('workers', this.pool.workerCount);
+    return leaks.length === 0 ? undefined : leaks.join(', ');
+  }
+
+  #register(bus: Handle, fd: Handle, readOnly: boolean): Result<boolean, AsyncError> {
+    const resource = this.resources.get(fd);
+    if (!resource.ok) {
+      return resource;
+    }
+    const poller = this.#polls.get(bus);
+    if (poller === undefined) {
+      return err(BADF);
+    }
+    const source = pollableOf(resource.value);
+    if (source === undefined) {
+      return ok(false);
+    }
+    if (resource.value.kind === 'pipe') {
+      // epoll registration makes the descriptor nonblocking (moonrun `poll_register`).
+      resource.value.end.nonblocking = true;
+    }
+    const interest = (readOnly ? EPOLLIN : EPOLLIN | EPOLLOUT) | EPOLLRDHUP;
+    const added = poller.register(resource.value, source, interest, 'edge', fd);
+    return added.ok ? ok(true) : err(native(added.error));
+  }
+
+  #unregisterPool(registration: PoolRegistration): void {
+    this.signals.detachFrom(registration.source);
+    this.#registration = undefined;
+    this.resources.remove(registration.sourceHandle);
+    for (const [, poller] of this.#polls.entries()) {
+      poller.unregister(registration.sourceResource);
+    }
+  }
+}

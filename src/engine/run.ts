@@ -1,3 +1,4 @@
+import { createAsyncKernel } from '../abi/async/index.ts';
 import type { ImportFamily, RunContext } from '../abi/context.ts';
 import { FAMILIES } from '../abi/families.ts';
 import { GuestMemory } from '../abi/memory.ts';
@@ -72,12 +73,15 @@ export async function run(
   const stdio = new Stdio(host.stdio);
   const termination = new TerminationCell();
   const cleanups: (() => void)[] = [];
+  const asyncKernel = createAsyncKernel(host);
+  cleanups.push(() => asyncKernel.teardown());
   const ctx: RunContext = {
     host,
     stdio,
     printWriter: new Utf16Writer(),
     memory: new GuestMemory(),
     termination,
+    asyncKernel,
     moduleName: loaded.name,
     args: options.args,
     onTeardown: (cleanup) => {

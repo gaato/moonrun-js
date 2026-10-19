@@ -1,4 +1,5 @@
 import type { Stdio, Utf16Writer } from '../domains/stdio.ts';
+import type { AsyncKernel } from '../kernel/async-kernel.ts';
 import type { TerminationCell } from '../kernel/termination.ts';
 import type { Host } from '../ports/host.ts';
 import type { ModuleImports } from './define.ts';
@@ -11,6 +12,8 @@ export interface RunContext {
   readonly printWriter: Utf16Writer;
   readonly memory: GuestMemory;
   readonly termination: TerminationCell;
+  /** The `moonbitlang/async` host state (shared with `moonbitlang/core`'s c_buffers). */
+  readonly asyncKernel: AsyncKernel;
   /** argv[0]: the wasm path exactly as given. */
   readonly moduleName: string;
   readonly args: readonly string[];
