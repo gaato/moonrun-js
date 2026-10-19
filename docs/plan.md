@@ -131,6 +131,7 @@ test/{unit,wat,fixtures/mbt,conformance}   bin/{moonrun-js, moonrun-js-deno, moo
 - **P4 TLS**: `crates/tls-engine` + ラッパ + ルート取得、次にサーバ側、最後に PFX。
   - 終了条件: async の TLS テスト（`test_keys/`）一致、実ホストへの HTTPS。**download.mooncakes.io の gaato/discord-cli と gaato/kbbi.mbt のビルド済み wasm が Node・Deno・Bun で本家と同じ stdout・exit**。
 - **P5 プロセス・シグナル・SQLite・ポリシー**: spawn/wait（パイプ中継）、シグナル配送と signal 終了、sqlite（S8 の結果で sqlite-wasm + 同期 JS VFS か自前 wasi-sdk ビルドを選ぶ。`node:sqlite` は statement ハンドルが無いので不可）、`--policy` / `--policy-source-dir` / `MOONRUN_INHERITED_POLICY`（`$MR/src/policy/*.rs` 移植）、`MOONBIT_ASYNC_CHECK_FD_LEAK`。
+  - ポリシーの読み込み（TOML/JSON/`.mbtx` の解析と検証）は、moonrun の `policy/config.rs` を基準 commit から取り込んだ小さな Rust wasm（`crates/policy-config`）への置き換えを組み込み時に行う。理由: 上流で変更が多く（2026-08〜10 で 15 回）、serde_json/toml/serde_yaml のエラー文言を TS でまねるより追従が機械的になる。判定ロジックは上流の変更箇所を見て、Rust 側に寄せるかを決める。デマングル・ソースマップは変更が少ないので TS のまま。
   - 終了条件: async スイート全体が一致、moonrun の sqlite / policy 系テストケース一致。
 - **P6 マルチランタイム仕上げ**: JSC・SpiderMonkey のスタック解析、必要なら Deno/Bun 専用アダプタ。互換レベル L0 exit / L1 stdout / L2 stderr（正規化）/ L3 バイト一致。
   - 終了条件: V8 系（Node・Deno・Chromium）は core と async で L3、Bun（JSC）は L2。
