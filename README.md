@@ -21,6 +21,13 @@ produce the same stdout, stderr and exit status. Known differences are listed wi
 npx moonrun-js program.wasm -- arg1 arg2
 ```
 
+On Deno or Bun:
+
+```fish
+deno run -A npm:moonrun-js program.wasm -- arg1 arg2
+bunx --bun moonrun-js program.wasm -- arg1 arg2
+```
+
 The arguments follow `moonrun`: `[--test-args JSON] [--policy FILE [--policy-source-dir DIR]]
 [--no-stack-trace] <wasm> [-- args...]`.
 

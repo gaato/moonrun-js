@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DENO_DIR: ${{ github.workspace }}/.cache/deno
+      XDG_CACHE_HOME: ${{ github.workspace }}/.cache/xdg
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: jdx/mise-action@v5.2.1
+      - name: Check release tag
+        run: |
+          version="$(mise exec -- node -p 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
+          test "$GITHUB_REF_NAME" = "v$version"
+      - name: Install pinned MoonBit
+        run: |
+          mise exec -- moonup install "$(cat moonbit-version)"
+          toolchain="$HOME/.moonup/toolchains/$(cat moonbit-version)"
+          echo "$toolchain/bin" >> "$GITHUB_PATH"
+          echo "MOONRUN_REFERENCE=$toolchain/bin/moonrun" >> "$GITHUB_ENV"
+      - run: mise exec -- pnpm install --frozen-lockfile
+      - run: mise exec -- pnpm typecheck
+      - run: mise exec -- pnpm lint
+      - run: mise exec -- pnpm test
+      - run: mise exec -- pnpm build
+      - name: Check trusted publishing prerequisites
+        run: |
+          at_least() { test "$(printf '%s\n' "$1" "$2" | sort -V | head -n 1)" = "$2"; }
+          at_least "$(mise exec -- node -p 'process.versions.node')" 22.14.0
+          if ! at_least "$(mise exec -- npm --version)" 11.5.1; then
+            mise exec -- npm install --global npm@11.20.0
+          fi
+          at_least "$(mise exec -- npm --version)" 11.5.1
+      - name: Pack and smoke-test published layout
+        run: |
+          pack_dir="$(mktemp -d "$RUNNER_TEMP/moonrun-js-pack.XXXXXX")"
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/moonrun-js-smoke.XXXXXX")"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          filename="$(mise exec -- npm pack --json --pack-destination "$pack_dir" | mise exec -- node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8"))[0].filename')"
+          tarball="$pack_dir/$filename"
+          mise exec -- npm install --prefix "$smoke_dir" --ignore-scripts --no-audit --no-fund "$tarball"
+          actual="$(mise exec -- "$smoke_dir/node_modules/.bin/moonrun-js" --version)"
+          expected="$(mise exec -- node bin/moonrun-js --version)"
+          echo "$actual"
+          test "$actual" = "$expected"
+          echo "RELEASE_TARBALL=$tarball" >> "$GITHUB_ENV"
+      - name: Publish with npm trusted publishing
+        run: mise exec -- npm publish "$RELEASE_TARBALL" --access public --provenance

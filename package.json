@@ -1,6 +1,6 @@
 {
   "name": "moonrun-js",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A TypeScript implementation of MoonBit's moonrun for JavaScript runtimes",
   "keywords": [
     "moonbit",

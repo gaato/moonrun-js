@@ -10,7 +10,11 @@ import { nodeComponentModule, nodeDiagnostics } from './components.ts';
 import { nodeHost } from './index.ts';
 import { takeInheritedPolicy } from './policy-loader.ts';
 
-export const VERSION = '0.0.0';
+// src/ and the published dist/ keep the same layout relative to the package root.
+const metadata = JSON.parse(
+  readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
+) as { version: string };
+export const VERSION = metadata.version;
 const COMPAT = 'compat moonrun 0.1.20261012 748b63c';
 
 /** anyhow's `{:?}` rendering of an error chain, as printed by moonrun's `main`. */
