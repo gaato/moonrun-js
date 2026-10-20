@@ -72,6 +72,7 @@ async function readExecutable(
   path: string,
   tree: ProcessTree,
 ): Promise<Result<Uint8Array, HostError>> {
+  if (treeClosed(tree)) return err({ code: 'EINTR' });
   const stat = await files.async.statAt(undefined, path, true);
   if (!stat.ok) return stat;
   if (stat.value.kind !== 'file') return err({ code: 'EACCES' });
@@ -118,11 +119,48 @@ async function readExecutable(
   }
 }
 
+const DEFAULT_PATH = '/usr/local/bin:/usr/bin:/bin';
+
+async function searchPath(
+  files: FilePort,
+  program: string,
+  cwd: string,
+  path: string,
+  tree: ProcessTree,
+): Promise<Result<Uint8Array, HostError>> {
+  let failure: HostError = { code: 'ENOENT' };
+  // An empty command is not a directory candidate, even with an empty PATH component.
+  if (program === '') return err(failure);
+  for (const directory of path.split(':')) {
+    const candidate = directory === '' ? program : `${directory}/${program}`;
+    const result = await readExecutable(
+      files,
+      candidate.startsWith('/') ? candidate : `${cwd}/${candidate}`,
+      tree,
+    );
+    if (result.ok) return result;
+    switch (result.error.code) {
+      case 'ENOENT':
+      case 'ENOTDIR':
+        break;
+      case 'EACCES':
+        failure = result.error;
+        break;
+      case 'ENOEXEC':
+        // Browser commands must be wasm; keep searching instead of invoking a native shell.
+        if (failure.code !== 'EACCES') failure = result.error;
+        break;
+      default:
+        return result;
+    }
+  }
+  return err(failure);
+}
+
 export function browserProcess(deps: ProcessDeps): ProcessPort {
   return {
     spawn: async (request): Promise<Result<ChildProcess, HostError>> => {
-      const fromPath = deps.execPaths && request.program.includes('/');
-      if (!fromPath && deps.resolver === undefined) return err({ code: 'ENOSYS' });
+      if (!deps.execPaths && deps.resolver === undefined) return err({ code: 'ENOSYS' });
       if (treeClosed(deps.tree)) return err({ code: 'EINTR' });
       if (request.extraFds.length > 0) return err({ code: 'ENOSYS' });
       const canonical = await deps.parent.files.async.realpath(request.cwd ?? '.');
@@ -131,27 +169,43 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
       const kind = await deps.parent.files.async.statAt(undefined, cwd, true);
       if (!kind.ok) return kind;
       if (kind.value.kind !== 'dir') return err({ code: 'ENOTDIR' });
+      const env = childEnvironment(request.env);
       let wasm: Uint8Array | WebAssembly.Module | undefined;
+      let failure: HostError = { code: 'ENOENT' };
       try {
-        if (fromPath) {
+        if (deps.execPaths) {
           // Preserve physical '..' / symlink traversal in the filesystem's async walker.
           const path = request.program.startsWith('/')
             ? request.program
             : `${cwd}/${request.program}`;
-          const executable = await readExecutable(deps.parent.files, path, deps.tree);
-          if (!executable.ok) return executable;
-          wasm = executable.value;
-        } else {
+          const direct = request.program.includes('/');
+          const executable = direct
+            ? await readExecutable(deps.parent.files, path, deps.tree)
+            : await searchPath(
+                deps.parent.files,
+                request.program,
+                cwd,
+                env['PATH'] ?? DEFAULT_PATH,
+                deps.tree,
+              );
+          if (executable.ok) wasm = executable.value;
+          else {
+            if (direct || !['ENOENT', 'EACCES', 'ENOEXEC'].includes(executable.error.code))
+              return executable;
+            failure = executable.error;
+          }
+        }
+        if (wasm === undefined && !treeClosed(deps.tree)) {
           wasm = await deps.resolver?.(request.program, request.argv.slice(1), {
             cwd,
-            env: childEnvironment(request.env),
+            env,
           });
         }
       } catch {
         return err({ code: 'EIO' });
       }
       if (treeClosed(deps.tree)) return err({ code: 'EINTR' });
-      if (wasm === undefined) return err({ code: 'ENOENT' });
+      if (wasm === undefined) return err(failure);
       const owned: HostFd[] = [];
       const readers: BrowserStdin[] = [];
       const duplicate = (raw: number): HostFd => {

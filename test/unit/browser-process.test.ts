@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { WorkerMessage, WorkerReply } from '../../src/hosts/browser/execute.ts';
-import { createBrowserHost } from '../../src/hosts/browser/host.ts';
+import { type BrowserHostOptions, createBrowserHost } from '../../src/hosts/browser/host.ts';
 import { runInWorker } from '../../src/hosts/browser/index.ts';
 import { type CommandContext, childExit } from '../../src/hosts/browser/process.ts';
 import { BrowserStdin } from '../../src/hosts/browser/streams.ts';
@@ -185,7 +185,179 @@ function spawnRequest(program: string): SpawnRequest {
   };
 }
 
+async function filesystemShell(script: string, options: BrowserHostOptions) {
+  stubAssets();
+  let stdout = '';
+  let stderr = '';
+  const host = await createBrowserHost({
+    ...options,
+    stdout: (b) => {
+      stdout += new TextDecoder().decode(b);
+    },
+    stderr: (b) => {
+      stderr += new TextDecoder().decode(b);
+    },
+  });
+  const spawn = vi.spyOn(host.process, 'spawn');
+  const outcome = await host.run(bytes('sh'), { name: 'sh', args: ['-c', script] });
+  return { stdout, stderr, outcome, spawns: spawn.mock.calls.map(([request]) => request) };
+}
+
 describe('browser wasm processes with cli/sh 0.2.1', () => {
+  it('searches the child PATH before the resolver; cli/sh passes bare commands and has no command/which builtins', async () => {
+    const resolveCommand = vi.fn(async () => undefined);
+    const actual = await filesystemShell(
+      'PATH=/work/bin:$PATH; prog; echo $?; command -v prog; echo $?; which prog; echo $?',
+      { env: { PATH: '/bin' }, files: { 'bin/prog': bytes('false') }, resolveCommand },
+    );
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect(actual.stdout).toBe('1\n127\n127\n');
+    expect(actual.stderr).toBe(
+      'sh: OSError("@process.run(): No such file or directory")\n'.repeat(2),
+    );
+    expect(actual.spawns.map((r) => r.program)).toEqual(['prog', 'command', 'which']);
+    expect(actual.spawns[0]?.env).toContain('PATH=/work/bin:/bin');
+    expect(resolveCommand.mock.calls).toEqual([
+      ['command', ['-v', 'prog'], { cwd: '/work', env: { PATH: '/work/bin:/bin', PWD: '/work' } }],
+      ['which', ['prog'], { cwd: '/work', env: { PATH: '/work/bin:/bin', PWD: '/work' } }],
+    ]);
+  });
+  it('honors PATH order and skips non-wasm and directory candidates before a valid command', async () => {
+    const actual = await filesystemShell('prog; echo $?; PATH=/second:/first; prog; echo $?', {
+      execPaths: true,
+      env: { PATH: '/text:/directory:/not-a-dir:/first:/second' },
+      files: {
+        '/text/prog': 'not wasm',
+        '/directory/prog': null,
+        '/not-a-dir': 'file',
+        '/first/prog': bytes('false'),
+        '/second/prog': bytes('true'),
+      },
+    });
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect({ stdout: actual.stdout, stderr: actual.stderr }).toEqual({
+      stdout: '1\n0\n',
+      stderr: '',
+    });
+  });
+  for (const PATH of ['', ':/later', '/absent:', '/absent::/later', 'bin:/later']) {
+    it(`resolves empty and relative PATH components against spawn cwd: ${JSON.stringify(PATH)}`, async () => {
+      const actual = await filesystemShell('cd sub; prog; echo $?', {
+        execPaths: true,
+        env: { PATH },
+        files: {
+          'sub/prog': bytes('false'),
+          'sub/bin/prog': bytes('false'),
+          '/later/prog': bytes('true'),
+        },
+      });
+      expect(actual.outcome).toEqual({ kind: 'completed' });
+      expect({ stdout: actual.stdout, stderr: actual.stderr }).toEqual({
+        stdout: '1\n',
+        stderr: '',
+      });
+    });
+  }
+  it('uses /usr/local/bin:/usr/bin:/bin only when PATH is unset', async () => {
+    const files = { '/usr/local/bin/prog': bytes('false'), '/usr/bin/prog': bytes('true') };
+    const actual = await filesystemShell('prog; echo $?', {
+      execPaths: true,
+      files,
+    });
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect({ stdout: actual.stdout, stderr: actual.stderr }).toEqual({ stdout: '1\n', stderr: '' });
+    const empty = await filesystemShell('prog; echo $?', {
+      execPaths: true,
+      files,
+      env: { PATH: '' },
+    });
+    expect(empty.outcome).toEqual({ kind: 'completed' });
+    expect(empty.stdout).toBe('127\n');
+    expect(empty.stderr).toBe('sh: OSError("@process.run(): No such file or directory")\n');
+  });
+  it('finds commands on an uncached /bin mount through Worker RPC without a resolver', async () => {
+    const close = bridge();
+    const mount = fakeMount({ prog: bytes('false') }, { cache: false });
+    let stdout = '';
+    let stderr = '';
+    try {
+      expect(
+        await runInWorker({
+          wasm: bytes('sh'),
+          args: ['-c', 'prog; echo $?'],
+          mounts: { '/bin': mount.provider },
+          stdout: (b) => {
+            stdout += new TextDecoder().decode(b);
+          },
+          stderr: (b) => {
+            stderr += new TextDecoder().decode(b);
+          },
+        }),
+      ).toEqual({ kind: 'completed' });
+      expect({ stdout, stderr }).toEqual({ stdout: '1\n', stderr: '' });
+      expect(mount.calls.some((c) => c.op === 'read' && c.path === '/prog')).toBe(true);
+      expect(mount.calls.filter((c) => c.op === 'open')).toHaveLength(1);
+      expect(mount.calls.filter((c) => c.op === 'close')).toHaveLength(1);
+    } finally {
+      await close();
+    }
+  });
+  it('rechecks PATH after VFS writes and falls back to the resolver after skipped candidates', async () => {
+    const resolveCommand = vi.fn(async () => bytes('true'));
+    const actual = await filesystemShell('prog; echo $?; echo text > bin/prog; prog; echo $?', {
+      env: { PATH: '/work/bin' },
+      files: { 'bin/prog': bytes('false') },
+      resolveCommand,
+    });
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect({ stdout: actual.stdout, stderr: actual.stderr }).toEqual({
+      stdout: '1\n0\n',
+      stderr: '',
+    });
+    expect(resolveCommand).toHaveBeenCalledExactlyOnceWith('prog', [], {
+      cwd: '/work',
+      env: { PATH: '/work/bin', PWD: '/work' },
+    });
+  });
+  it('propagates fatal PATH lookup errors without invoking the resolver', async () => {
+    stubAssets();
+    const mount = fakeMount({});
+    const resolveCommand = vi.fn(async () => bytes('true'));
+    const host = await createBrowserHost({
+      mounts: {
+        '/bin': { ...mount.provider, stat: async () => ({ ok: false, error: { code: 'EIO' } }) },
+      },
+      resolveCommand,
+    });
+    expect(await host.process.spawn({ ...spawnRequest('prog'), env: ['PATH=/bin'] })).toEqual({
+      ok: false,
+      error: { code: 'EIO' },
+    });
+    expect(resolveCommand).not.toHaveBeenCalled();
+  });
+  for (const [files, code, message] of [
+    [{}, 'ENOENT', 'No such file or directory'],
+    [{ '/first/prog': null }, 'EACCES', 'Permission denied'],
+    [{ '/first/prog': 'not wasm' }, 'ENOEXEC', 'Exec format error'],
+    [{ '/first/prog': null, '/second/prog': 'not wasm' }, 'EACCES', 'Permission denied'],
+    [{ '/first/prog': 'not wasm', '/second/prog': null }, 'EACCES', 'Permission denied'],
+  ] as const) {
+    for (const fallback of [false, true]) {
+      it(`reports ${code} after exhausting PATH (resolver:${fallback}, files:${JSON.stringify(files)})`, async () => {
+        const resolveCommand = vi.fn(async () => undefined);
+        const actual = await filesystemShell('prog; echo $?', {
+          execPaths: true,
+          env: { PATH: '/first:/second' },
+          files,
+          ...(fallback ? { resolveCommand } : {}),
+        });
+        expect(actual.outcome).toEqual({ kind: 'completed' });
+        expect(actual.stdout).toBe('127\n');
+        expect(actual.stderr).toBe(`sh: OSError("@process.run(): ${message}")\n`);
+        expect(resolveCommand).toHaveBeenCalledTimes(fallback ? 1 : 0);
+      });
+    }
+  }
   it('executes memory paths with spawn cwd, absolute paths, nested children and pipes', async () => {
     stubAssets();
     let stdout = '';
@@ -218,7 +390,7 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
     expect({ stdout, stderr }).toEqual({ stdout: '0\n1\n1\n1\nHELLO\n', stderr: '' });
     expect(host.process.kill(999999, 0)).toEqual({ ok: false, error: { code: 'ESRCH' } });
   });
-  it('defaults path execution on with a resolver, leaving bare names exclusively to it', async () => {
+  it('defaults path execution on with a resolver and falls back after a PATH miss', async () => {
     stubAssets();
     const resolveCommand = vi.fn(async () => bytes('false'));
     let stdout = '';
@@ -257,6 +429,21 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
       env: { PWD: '/work' },
     });
   });
+  it('lets execPaths:false disable filesystem PATH search too', async () => {
+    const resolveCommand = vi.fn(async () => bytes('false'));
+    const actual = await filesystemShell('prog; echo $?', {
+      execPaths: false,
+      env: { PATH: '/work/bin' },
+      files: { 'bin/prog': bytes('true') },
+      resolveCommand,
+    });
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect(actual.stdout).toBe('1\n');
+    expect(resolveCommand).toHaveBeenCalledExactlyOnceWith('prog', [], {
+      cwd: '/work',
+      env: { PATH: '/work/bin', PWD: '/work' },
+    });
+  });
   it('keeps processes unsupported without a resolver or path-execution capability', async () => {
     stubAssets();
     for (const options of [
@@ -274,7 +461,7 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
     const host = await createBrowserHost({ execPaths: true, files: { prog: bytes('true') } });
     expect(await host.process.spawn(spawnRequest('prog'))).toEqual({
       ok: false,
-      error: { code: 'ENOSYS' },
+      error: { code: 'ENOENT' },
     });
   });
   for (const [name, contents, code, message] of [

@@ -24,7 +24,7 @@ export interface BrowserHostOptions {
   /** A synchronous byte source (read into the buffer, return count), or finite input. Default EOF. */
   readonly stdin?: Uint8Array | BrowserStdin | ((buffer: Uint8Array) => number);
   readonly resolveCommand?: ResolveCommand;
-  /** Execute slash-containing paths from the VFS. Defaults on with a resolver or nonempty mounts. */
+  /** Execute VFS paths and search child PATH. Defaults on with a resolver or nonempty mounts. */
   readonly execPaths?: boolean;
   /** WebSocket URL, including any relay authentication query. No relay means ENOSYS. */
   readonly relay?: string;

@@ -192,7 +192,7 @@ const running = runInWorker({
   name: 'sh',
   args: ['-i'],
   stdin: 'stream',
-  // Executed on the main thread. The embedder resolves bare command names.
+  // Executed on the main thread after a filesystem PATH miss.
   resolveCommand: async (program, args, { cwd, env }) =>
     resolveProvidedWasm(program, args, { cwd, env }),
   stdout: consumeStdoutBytes,
@@ -207,8 +207,9 @@ const outcome = await running;
 `resolveCommand(program, args, {cwd, env})` returns a Promise of wasm bytes, a compiled
 `WebAssembly.Module`, or `undefined`. `program` is exactly the guest's request, `args`
 excludes argv[0], cwd is an existing absolute directory, and env is the child's complete
-snapshot (first repeated key wins). The callback owns PATH/catalog policy: the Host does
-not search, fetch or cache commands. `undefined` gives ENOENT; cli/sh prints
+snapshot (first repeated key wins). The callback supplies fallback catalog/loading policy;
+the Host includes no command catalog or network fetcher. `undefined` gives ENOENT after
+a complete filesystem miss (candidate errors are preserved as described below); cli/sh prints
 `sh: OSError("@process.run(): No such file or directory")` and sets status 127, exactly
 as with a missing native command. A callback rejection gives EIO. If passing a Module,
 the embedder should compile with MoonBit's js-string builtins/options when needed;
@@ -216,7 +217,8 @@ bytes go through the existing compatibility compiler.
 
 **Executing files:** `execPaths` defaults to `true` when a resolver or at least one mount
 is configured, and `false` otherwise. Set `execPaths: true` to enable it for a memory-only
-filesystem without a resolver. With this enabled, a program containing `/` bypasses the
+filesystem without a resolver. This single switch enables both direct paths and PATH
+search. With this enabled, a program containing `/` bypasses the
 resolver and loads from the run's filesystem: `./prog.wasm` is relative to the **spawn
 cwd**, while `/mnt/local/prog.wasm` is absolute. Symlinks follow the ordinary filesystem
 rules. Async stat/open/read support uncached mounts, including main-thread providers;
@@ -225,16 +227,46 @@ file starting with `\0asm`. Executable permission bits are not required; native 
 and shebang scripts are not supported. The existing compiler validates the remaining
 wasm, and a compile failure follows the child exit-1 mapping below.
 
+For a name **without `/`**, resolution is:
+
+1. Search directories in the **child spawn environment's PATH**, left to right, in the
+   memory VFS and mounts. If PATH is unset, use `/usr/local/bin:/usr/bin:/bin`. An empty
+   PATH is a single current-directory component; leading, trailing or repeated colons
+   also represent the spawn cwd. Relative directories resolve against that cwd.
+2. Run the first regular file starting with the wasm magic. Skip missing paths, ENOTDIR,
+   non-wasm files and non-regular files, remembering format/permission errors. Search uses
+   the same async stat/open/read ports as direct paths, with no separate command cache;
+   later lookups observe VFS writes under the provider's ordinary caching policy.
+3. If no candidate matches, call `resolveCommand` with the original bare name, args,
+   cwd and child environment. A returned command wins over remembered candidate errors.
+   If absent or `undefined`, return EACCES if any candidate was denied/non-regular,
+   otherwise ENOEXEC if any candidate was non-wasm, otherwise ENOENT. Other filesystem
+   errors stop lookup immediately; a resolver rejection remains EIO.
+
+The filesystem-PATH-first order follows [POSIX execvp](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html)
+and [Wasmer WASIX's PATH-enabled spawn](https://github.com/wasmerio/wasmer/blob/main/lib/wasix/src/syscalls/wasix/proc_spawn3.rs);
+the embedder resolver fallback is a moonrun-js extension. Skipping non-wasm formats is
+also a browser policy: real moonrun stops at ENOEXEC even if a later native executable
+exists, while POSIX execvp can hand such a file to a shell. We do not execute native
+formats or shebang scripts. Real moonrun does continue after EACCES and remembers it
+when no candidate succeeds, as here.
+
+cli/sh 0.2.1 passes bare names unchanged to `@process.run()`; PATH lookup happens in this
+Host, not in cli/sh. `command -v` and `which` are not builtins in that shell: it attempts
+external commands named `command` and `which`. Embedders can supply these through PATH
+or the resolver if needed.
+
 Missing files give ENOENT, non-wasm files give ENOEXEC (`Exec format error`), and directories
 or other non-regular files give EACCES (`Permission denied`). Other filesystem failures
 propagate their error code. Like real moonrun, cli/sh 0.2.1 prints an `@process.run()`
 OSError and sets `$?` to **127 for all these spawn failures**, including ENOEXEC/EACCES.
-There is no resolver fallback after a failed path lookup. Names without `/` always use
-the resolver, without searching the VFS or PATH. Setting `execPaths: false` restores
+There is no resolver fallback after a failed **slash-containing** path lookup.
+Setting `execPaths: false` disables filesystem execution, including PATH search, and restores
 resolver ownership of **all** command names, including ones with `/`.
 
-Without a resolver, bare-name spawns return ENOSYS. With neither a resolver nor enabled
-path execution, all spawn/kill operations return ENOSYS as before. Policy transfers
+Without a resolver, enabled filesystem execution still supports bare names on PATH;
+an unsuccessful search returns the errors above. With neither a resolver nor enabled
+filesystem execution, all spawn/kill operations return ENOSYS as before. Policy transfers
 always remain unsupported (ENOSYS).
 
 Resolved commands execute as separate Runs **inside the same Worker**. Each gets its
@@ -389,6 +421,8 @@ test mounted redirects, longest-prefix routing, read-only failures, caching and 
 cancellation, and exercise the native-directory provider with fake Web API handles.
 Small WASI and legacy guests pin the synchronous cache limitation.
 Path-execution tests cover memory files, absolute/relative spawn cwd paths, nested shells,
-pipes, uncached mounted files through Worker RPC with short reads, resolver-only bare
-names, defaults and opting out. ENOENT/ENOEXEC/EACCES messages and cli/sh status 127 are
+pipes, uncached mounted files through Worker RPC with short reads, child PATH order,
+empty/relative PATH components, format/permission candidate skipping, resolver fallback,
+VFS writes between lookups, defaults and opting out. Tests also observe cli/sh's external
+`command`/`which` requests. ENOENT/ENOEXEC/EACCES messages and cli/sh status 127 are
 pinned against observations with real moonrun and equivalent native files.
