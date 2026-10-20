@@ -420,6 +420,13 @@ Mount tests run ls/cat/grep against delayed main-thread providers through a real
 test mounted redirects, longest-prefix routing, read-only failures, caching and issued-job
 cancellation, and exercise the native-directory provider with fake Web API handles.
 Small WASI and legacy guests pin the synchronous cache limitation.
+Real cli/cp, cli/cat, cli/head, cli/wc, cli/sort and cli/ls 0.2.1 regressions cover
+cached/uncached fake providers and the directory-handle adapter. cp copies binary data
+in both directions between memory and mounts through child Host views. These fixtures
+use new destinations and `--no-preserve=mode`: cli/cp 0.2.1 itself rejects permission
+preservation and overwrites independently of the Host. Async open-stat/fstatx and
+size/time jobs always use async descriptor metadata, including with `cache: false`;
+only stdio descriptors use the Host's synthetic stat shim.
 Path-execution tests cover memory files, absolute/relative spawn cwd paths, nested shells,
 pipes, uncached mounted files through Worker RPC with short reads, child PATH order,
 empty/relative PATH components, format/permission candidate skipping, resolver fallback,

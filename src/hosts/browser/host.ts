@@ -121,7 +121,12 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     const files = {
       ...view.files,
       fstat,
-      async: { ...view.files.async, fstat: async (fd: Parameters<typeof fstat>[0]) => fstat(fd) },
+      async: {
+        ...view.files.async,
+        // Only stdio uses synthetic metadata; mounted descriptors must await their provider.
+        fstat: async (fd: Parameters<typeof fstat>[0]) =>
+          fd >= 0 && fd <= 2 ? fstat(fd) : view.files.async.fstat(fd),
+      },
     };
     const env = new Map(Object.entries(initialEnv));
     const dns = new BrowserDns();
