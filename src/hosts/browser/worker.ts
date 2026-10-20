@@ -9,6 +9,7 @@ import type { BrowserSignalOptions } from './host.ts';
 import { type BrowserMemoryFs, dispatchMemoryFs } from './memory-fs.ts';
 import { mountError } from './mount-provider.ts';
 import { type MountValue, proxyMounts } from './mount-rpc.ts';
+import type { ResolvedCommand } from './process.ts';
 import { BrowserStdin } from './streams.ts';
 
 const scope = globalThis as unknown as {
@@ -18,7 +19,7 @@ const scope = globalThis as unknown as {
 const stdin = new BrowserStdin();
 const pending = new Map<
   number,
-  { resolve: (wasm: Uint8Array | WebAssembly.Module | undefined) => void; reject: () => void }
+  { resolve: (command: ResolvedCommand | undefined) => void; reject: () => void }
 >();
 let nextRequest = 0;
 let started = false;
@@ -77,7 +78,7 @@ function start(request: BrowserRunRequest): void {
     ...(request.commands === true
       ? {
           resolveCommand: (program, args, context) =>
-            new Promise<Uint8Array | WebAssembly.Module | undefined>((resolve, reject) => {
+            new Promise<ResolvedCommand | undefined>((resolve, reject) => {
               const id = ++nextRequest;
               pending.set(id, {
                 resolve,
@@ -127,7 +128,7 @@ scope.onmessage = ({ data }) => {
       const callback = pending.get(data.id);
       pending.delete(data.id);
       if (data.failed) callback?.reject();
-      else callback?.resolve(data.wasm);
+      else callback?.resolve(data.command);
       break;
     }
   }

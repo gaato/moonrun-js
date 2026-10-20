@@ -20,6 +20,7 @@ const hashes: Readonly<Record<string, string>> = {
   cat: '0077933f172648eee22f902f14c83ca6c732afda50d1a7c1c47163ec4e587374',
   ls: 'a9cefa72d5504acd98396a84c00192e12d18458cf4baef17aae26adc66124dc0',
   grep: '6c7e3e7a6ff8b76916f7c1085a48fda5085a24366cf63829b437895b95586341',
+  echo: '40d276a5243581112e6817f9a7853ac648b8da8fd80a79fbce6f760c82f01dc0',
 };
 const modules = new Map<string, Uint8Array>();
 let scratch: string;
@@ -32,7 +33,7 @@ const assets: Readonly<Record<string, string>> = {
 beforeAll(async () => {
   await mkdir(cache, { recursive: true });
   scratch = await mkdtemp(new URL('tests-', cache).pathname);
-  for (const name of ['sh', 'tr', 'cat', 'ls', 'grep']) {
+  for (const name of ['sh', 'tr', 'cat', 'ls', 'grep', 'echo']) {
     const file = new URL(`${name}.wasm`, cache);
     let bytes: Uint8Array;
     try {
@@ -64,6 +65,12 @@ beforeAll(async () => {
   ]);
   if (parent.status !== 0) throw new Error(parent.stderr.toString());
   modules.set('signal-parent', new Uint8Array(parent.stdout));
+  const argv = spawnSync('wasm-tools', [
+    'parse',
+    new URL('test/wat/wasi-args-env.wat', root).pathname,
+  ]);
+  if (argv.status !== 0) throw new Error(argv.stderr.toString());
+  modules.set('argv-dump', new Uint8Array(argv.stdout));
 }, 30000);
 afterAll(async () => {
   await rm(scratch, { recursive: true, force: true });
@@ -203,7 +210,117 @@ async function filesystemShell(script: string, options: BrowserHostOptions) {
   return { stdout, stderr, outcome, spawns: spawn.mock.calls.map(([request]) => request) };
 }
 
+// The existing WASI fixture prints status/count/size/status followed by all argv strings.
+function argvPrefix(argv: readonly string[]): string {
+  const size = argv.reduce((sum, arg) => sum + new TextEncoder().encode(arg).length + 1, 0);
+  return `0\n${argv.length}\n${size}\n0\n${argv.join('\n')}\n`;
+}
+
 describe('browser wasm processes with cli/sh 0.2.1', () => {
+  it('runs real cli/echo with resolver-rewritten arguments and the original child context', async () => {
+    const seen: { program: string; args: readonly string[]; context: CommandContext }[] = [];
+    const actual = await filesystemShell('cd sub; moonx x/y/z a b', {
+      files: { sub: null },
+      env: { CUSTOM: 'value' },
+      resolveCommand: async (program, args, context) => {
+        seen.push({ program, args, context });
+        return { wasm: bytes('echo'), args: args.slice(1) };
+      },
+    });
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect({ stdout: actual.stdout, stderr: actual.stderr }).toEqual({
+      stdout: 'a b\n',
+      stderr: '',
+    });
+    expect(seen).toEqual([
+      {
+        program: 'moonx',
+        args: ['x/y/z', 'a', 'b'],
+        context: { cwd: '/work/sub', env: { CUSTOM: 'value', PWD: '/work/sub', OLDPWD: '/work' } },
+      },
+    ]);
+  });
+  for (const [overrides, argv] of [
+    [{}, ['launcher', 'keep', 'original']],
+    [{ args: [] }, ['launcher']],
+    [{ argv0: 'interpreter' }, ['interpreter', 'keep', 'original']],
+    [{ argv0: '', args: [] }, ['']],
+    [{ argv0: 'interpreter', args: ['changed'] }, ['interpreter', 'changed']],
+  ] as const) {
+    it(`applies optional resolver overrides: ${JSON.stringify(overrides)}`, async () => {
+      const actual = await filesystemShell('launcher keep original', {
+        resolveCommand: async () => ({ wasm: bytes('argv-dump'), ...overrides }),
+      });
+      expect(actual.outcome).toEqual({ kind: 'completed' });
+      expect(actual.stdout.startsWith(argvPrefix(argv))).toBe(true);
+      expect(actual.stderr).toBe('');
+    });
+  }
+  it('preserves plain file argv for PATH and execPaths hits without calling the resolver', async () => {
+    const resolveCommand = vi.fn(async () => ({
+      wasm: bytes('false'),
+      args: ['changed'],
+      argv0: 'changed',
+    }));
+    const actual = await filesystemShell('launcher keep original; ./prog.wasm path original', {
+      files: { '/bin/launcher': bytes('argv-dump'), 'prog.wasm': bytes('argv-dump') },
+      resolveCommand,
+    });
+    expect(actual.outcome).toEqual({ kind: 'completed' });
+    expect(actual.stdout.startsWith(argvPrefix(['launcher', 'keep', 'original']))).toBe(true);
+    expect(actual.stdout).toContain(argvPrefix(['./prog.wasm', 'path', 'original']));
+    expect(actual.stderr).toBe('');
+    expect(resolveCommand).not.toHaveBeenCalled();
+  });
+  it('relays wrapped Modules, rewritten argv and pipeline output through the real Worker', async () => {
+    const close = bridge();
+    const echo = await WebAssembly.compile(bytes('echo'), {
+      builtins: ['js-string'],
+      importedStringConstants: '_',
+    });
+    let stdout = '';
+    let stderr = '';
+    try {
+      expect(
+        await runInWorker({
+          wasm: bytes('sh'),
+          name: 'sh',
+          args: ['-c', 'moonx x/y/z a b | tr a-z A-Z; dump ignored'],
+          resolveCommand: async (program, args) => {
+            if (program === 'moonx') return { wasm: echo, args: args.slice(1) };
+            if (program === 'dump')
+              return { wasm: bytes('argv-dump'), args: ['rewritten'], argv0: 'interpreter' };
+            return modules.get(program);
+          },
+          stdout: (b) => {
+            stdout += new TextDecoder().decode(b);
+          },
+          stderr: (b) => {
+            stderr += new TextDecoder().decode(b);
+          },
+        }),
+      ).toEqual({ kind: 'completed' });
+      expect(stdout.startsWith(`A B\n${argvPrefix(['interpreter', 'rewritten'])}`)).toBe(true);
+      expect(stderr).toBe('');
+    } finally {
+      await close();
+    }
+  });
+  for (const rejected of [false, true]) {
+    it(`keeps resolver ${rejected ? 'rejections' : 'throws'} as EIO`, async () => {
+      const actual = await filesystemShell('broken; echo $?', {
+        resolveCommand: () => {
+          if (rejected) return Promise.reject(new Error('resolver detail'));
+          throw new Error('resolver detail');
+        },
+      });
+      expect(actual.outcome).toEqual({ kind: 'completed' });
+      expect({ stdout: actual.stdout, stderr: actual.stderr }).toEqual({
+        stdout: '127\n',
+        stderr: 'sh: OSError("@process.run(): Input/output error")\n',
+      });
+    });
+  }
   it('searches the child PATH before the resolver; cli/sh passes bare commands and has no command/which builtins', async () => {
     const resolveCommand = vi.fn(async () => undefined);
     const actual = await filesystemShell(

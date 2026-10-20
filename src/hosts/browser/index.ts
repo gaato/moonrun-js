@@ -31,7 +31,7 @@ export type {
   MountProvider,
   MountStat,
 } from './mount-provider.ts';
-export type { CommandContext, ResolveCommand } from './process.ts';
+export type { CommandContext, ResolveCommand, ResolvedCommand } from './process.ts';
 export { BrowserStdin } from './streams.ts';
 export type { BrowserFiles } from './vfs.ts';
 
@@ -146,20 +146,20 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
           case 'resolve': {
             void (async () => {
               try {
-                const wasm = await options.resolveCommand?.(
+                const command = await options.resolveCommand?.(
                   reply.program,
                   reply.args,
                   reply.context,
                 );
                 if (!done)
-                  worker.postMessage({ type: 'resolved', id: reply.id, wasm, failed: false });
+                  worker.postMessage({ type: 'resolved', id: reply.id, command, failed: false });
               } catch {
                 try {
                   if (!done)
                     worker.postMessage({
                       type: 'resolved',
                       id: reply.id,
-                      wasm: undefined,
+                      command: undefined,
                       failed: true,
                     });
                 } catch (e) {

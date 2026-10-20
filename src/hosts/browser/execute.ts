@@ -4,7 +4,7 @@ import { type BrowserHostOptions, type BrowserSignalOptions, createBrowserHost }
 import type { BrowserMemoryFs, MemoryFsRequest, MemoryFsValue } from './memory-fs.ts';
 import type { BrowserMounts } from './mount-provider.ts';
 import type { MountCall, MountDescriptions, MountValue } from './mount-rpc.ts';
-import type { CommandContext, ResolveCommand } from './process.ts';
+import type { CommandContext, ResolveCommand, ResolvedCommand } from './process.ts';
 import type { BrowserStdin } from './streams.ts';
 
 export interface BrowserRunRequest
@@ -59,7 +59,7 @@ export type WorkerMessage =
   | {
       readonly type: 'resolved';
       readonly id: number;
-      readonly wasm: Uint8Array | WebAssembly.Module | undefined;
+      readonly command: ResolvedCommand | undefined;
       readonly failed: boolean;
     };
 

@@ -16,11 +16,21 @@ export interface CommandContext {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
 }
+export type ResolvedCommand =
+  | Uint8Array
+  | WebAssembly.Module
+  | {
+      readonly wasm: Uint8Array | WebAssembly.Module;
+      /** Replacement arguments, excluding argv[0]. Omitted keeps the spawn arguments. */
+      readonly args?: readonly string[];
+      /** Replacement argv[0]. Omitted keeps the original name. */
+      readonly argv0?: string;
+    };
 export type ResolveCommand = (
   program: string,
   args: readonly string[],
   context: CommandContext,
-) => Promise<Uint8Array | WebAssembly.Module | undefined>;
+) => Promise<ResolvedCommand | undefined>;
 export interface ProcessTree {
   readonly controls: Map<number, BrowserControl>;
   closed: boolean;
@@ -171,6 +181,8 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
       if (kind.value.kind !== 'dir') return err({ code: 'ENOTDIR' });
       const env = childEnvironment(request.env);
       let wasm: Uint8Array | WebAssembly.Module | undefined;
+      let argv0 = request.argv[0] ?? request.program;
+      let args = request.argv.slice(1);
       let failure: HostError = { code: 'ENOENT' };
       try {
         if (deps.execPaths) {
@@ -196,10 +208,15 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
           }
         }
         if (wasm === undefined && !treeClosed(deps.tree)) {
-          wasm = await deps.resolver?.(request.program, request.argv.slice(1), {
+          const command = await deps.resolver?.(request.program, request.argv.slice(1), {
             cwd,
             env,
           });
+          if (command !== undefined && 'wasm' in command) {
+            wasm = command.wasm;
+            args = command.args === undefined ? args : [...command.args];
+            argv0 = command.argv0 ?? argv0;
+          } else wasm = command;
         }
       } catch {
         return err({ code: 'EIO' });
@@ -289,14 +306,7 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
         // Publication and bridge attachment happen before any child guest code executes.
         setTimeout(() => {
           void (async () => {
-            const outcome = await runBrowserGuest(
-              wasm,
-              request.argv[0] ?? request.program,
-              request.argv.slice(1),
-              host,
-              control,
-              io,
-            );
+            const outcome = await runBrowserGuest(wasm, argv0, args, host, control, io);
             if (outcome.kind === 'host-failure') {
               try {
                 host.stdio.writeStderr(

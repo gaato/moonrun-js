@@ -277,8 +277,44 @@ running.end();
 const outcome = await running;
 ```
 
-`resolveCommand(program, args, {cwd, env})` returns a Promise of wasm bytes, a compiled
-`WebAssembly.Module`, or `undefined`. `program` is exactly the guest's request, `args`
+`resolveCommand(program, args, {cwd, env})` returns `Promise<ResolvedCommand | undefined>`.
+The exported result type preserves raw bytes and compiled Modules and also accepts an
+interpreter-style command object:
+
+```ts
+type ResolvedCommand = Uint8Array | WebAssembly.Module | {
+  wasm: Uint8Array | WebAssembly.Module;
+  args?: readonly string[];
+  argv0?: string;
+};
+```
+
+Object `args` replaces the arguments **after argv[0]**; `[]` removes them all. `argv0`
+replaces the original name visible to the child (and names its Run for diagnostics).
+Omitted fields keep the spawn arguments and original argv[0] (or program name if absent).
+An explicit empty argv0 is preserved. Like a `#!` interpreter or binfmt handler, a resolver
+can consume its own dispatch arguments before starting the resolved wasm:
+
+```ts
+resolveCommand: async (program, args, context) => {
+  if (program === 'moonx') {
+    const [coordinate, ...guestArgs] = args;
+    if (coordinate === undefined) return undefined;
+    const wasm = await loadProvidedCommand(coordinate, context);
+    return wasm === undefined ? undefined : { wasm, args: guestArgs, argv0: coordinate };
+  }
+  return resolveOtherProvidedCommand(program, args, context);
+}
+```
+
+For example, `moonx gaato/kbbi/cmd/kbbi@0.1.6 rumah` can run kbbi with only `rumah` as
+its argument. Resolution/loading policy still belongs to the embedder. Rewriting applies
+only to resolver results; PATH and direct execPaths file hits retain their original argv.
+The rest of the spawn request (cwd, environment, stdio, pid and wait/kill behavior) is
+unchanged, and nested commands can use the same return shapes. Objects and Modules are
+relayed from the main thread when using `runInWorker`.
+
+`program` is exactly the guest's request, `args`
 excludes argv[0], cwd is an existing absolute directory, and env is the child's complete
 snapshot (first repeated key wins). The callback supplies fallback catalog/loading policy;
 the Host includes no command catalog or network fetcher. `undefined` gives ENOENT after
@@ -481,11 +517,15 @@ guest args/env/stdio/exit, SQLite commits and reopen, and the real Worker entry 
 checks wasm/Worker assets. Chrome verification is left to the coordinator; no browser
 or persistent demo server is started as part of implementation verification.
 
-The shell tests download cli/sh, cli/tr, cli/cat, cli/ls and cli/grep 0.2.1 only into `.cache/browser-shell/` and
+The shell tests download cli/sh, cli/tr, cli/cat, cli/ls, cli/grep and cli/echo 0.2.1 only
+into `.cache/browser-shell/` and
 verify fixed SHA-256 digests on every use. Tests compare pipelines, missing-command
 messages/status, nested sh and interactive output with the Node CLI using native host
 commands. Additional tests cover large pipeline backpressure, cwd/env/file redirection,
 merged output, precompiled children, traps/compile failures, kill/wait and SIGINT.
+Resolver rewrite tests run cli/echo 0.2.1 with consumed dispatch arguments, pipe its output
+through tr, and verify argv0/optional fields using the existing WASI argv fixture. Wrapped
+Modules and bytes cross a real Worker transport; raw return types remain covered.
 Group SIGINT tests cover cli/sh with a streaming cat, a cat pipeline and a nested shell,
 checking that the top Run ends too, plus delivery with no children. A small WAT parent
 captures SIGINT through the guest ABI, survives, and verifies its child's wait status -2.
