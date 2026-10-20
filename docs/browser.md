@@ -192,7 +192,7 @@ const running = runInWorker({
   name: 'sh',
   args: ['-i'],
   stdin: 'stream',
-  // Executed on the main thread. The embedder supplies all resolution and loading.
+  // Executed on the main thread. The embedder resolves bare command names.
   resolveCommand: async (program, args, { cwd, env }) =>
     resolveProvidedWasm(program, args, { cwd, env }),
   stdout: consumeStdoutBytes,
@@ -212,14 +212,36 @@ not search, fetch or cache commands. `undefined` gives ENOENT; cli/sh prints
 `sh: OSError("@process.run(): No such file or directory")` and sets status 127, exactly
 as with a missing native command. A callback rejection gives EIO. If passing a Module,
 the embedder should compile with MoonBit's js-string builtins/options when needed;
-bytes go through the existing compatibility compiler. Without a resolver, process
-spawn/kill/policy-transfer continue to return ENOSYS.
+bytes go through the existing compatibility compiler.
+
+**Executing files:** `execPaths` defaults to `true` when a resolver or at least one mount
+is configured, and `false` otherwise. Set `execPaths: true` to enable it for a memory-only
+filesystem without a resolver. With this enabled, a program containing `/` bypasses the
+resolver and loads from the run's filesystem: `./prog.wasm` is relative to the **spawn
+cwd**, while `/mnt/local/prog.wasm` is absolute. Symlinks follow the ordinary filesystem
+rules. Async stat/open/read support uncached mounts, including main-thread providers;
+the complete executable is read before creating the child. It must be a readable regular
+file starting with `\0asm`. Executable permission bits are not required; native binaries
+and shebang scripts are not supported. The existing compiler validates the remaining
+wasm, and a compile failure follows the child exit-1 mapping below.
+
+Missing files give ENOENT, non-wasm files give ENOEXEC (`Exec format error`), and directories
+or other non-regular files give EACCES (`Permission denied`). Other filesystem failures
+propagate their error code. Like real moonrun, cli/sh 0.2.1 prints an `@process.run()`
+OSError and sets `$?` to **127 for all these spawn failures**, including ENOEXEC/EACCES.
+There is no resolver fallback after a failed path lookup. Names without `/` always use
+the resolver, without searching the VFS or PATH. Setting `execPaths: false` restores
+resolver ownership of **all** command names, including ones with `/`.
+
+Without a resolver, bare-name spawns return ENOSYS. With neither a resolver nor enabled
+path execution, all spawn/kill operations return ENOSYS as before. Policy transfers
+always remain unsupported (ENOSYS).
 
 Resolved commands execute as separate Runs **inside the same Worker**. Each gets its
 spawn argv[0], args, environment, cwd view, diagnostics and kernel state; inodes and
 open-file descriptions are shared through the memory VFS. Duplicated file descriptors
 share offsets and survive parent closure. Components and trust roots are reused.
-Nested children use the same resolver. Pids increase from 1 within each Worker and
+Nested children use the same resolver and path-execution setting. Pids increase from 1 within each Worker and
 are synthetic; no OS processes are created.
 
 The existing kernel owns spawn/wait jobs, pid handles, cancellation, pipe readiness and
@@ -244,7 +266,7 @@ The kernel's process result is an exit code or negative signal, as in moonrun's 
 API, rather than a raw packed `waitpid` word. Output is drained before publishing normal
 child exit; forced termination may discard pending output. The top Run owns the Worker
 process tree: when it finishes, remaining wasm children are stopped and a late resolver
-result cannot create an orphan Run. Detached/background lifetimes across top Runs are
+result or file load cannot create an orphan Run. Detached/background lifetimes across top Runs are
 not supported.
 
 `write(bytes)` copies its input and returns a Promise for input capacity. Await it for
@@ -273,7 +295,7 @@ const delivered = await running.signal(2, { target: 'group' });
 
 This returns a `Promise<boolean>` acknowledged by the Worker. The run is treated as one
 foreground process group: **the top-level guest and all live wasm descendants** started
-through `resolveCommand`, including nested shells and their commands. Each receives the
+through the browser ProcessPort, including nested shells and their commands. Each receives the
 signal through its normal path: the top Run's signal dispatch, or `process.kill` for a
 child. A guest that captured the signal runs its handler; otherwise the default action
 applies. `true` means delivery to at least one live process, not that it has finished.
@@ -343,7 +365,7 @@ order is insertion order; mounted file sizes and order come from their providers
 Expected skill cases: kbbi/discord-cli `--help` and discord-cli's no-token error require
 no network. kbbi lookup, discord-cli API calls and web-fetch of `https://example.com`
 should work through the default allowlist and relay roots; other web-fetch destinations
-need `--allow`. Skills that launch provided wasm commands can use the resolver; native binaries,
+need `--allow`. Skills that launch provided wasm commands can use the resolver or filesystem paths; native binaries,
 UDP/listeners remain unavailable; host files require a granted directory handle mount.
 This is expected coverage, **not a Chrome test result**.
 
@@ -366,3 +388,7 @@ Mount tests run ls/cat/grep against delayed main-thread providers through a real
 test mounted redirects, longest-prefix routing, read-only failures, caching and issued-job
 cancellation, and exercise the native-directory provider with fake Web API handles.
 Small WASI and legacy guests pin the synchronous cache limitation.
+Path-execution tests cover memory files, absolute/relative spawn cwd paths, nested shells,
+pipes, uncached mounted files through Worker RPC with short reads, resolver-only bare
+names, defaults and opting out. ENOENT/ENOEXEC/EACCES messages and cli/sh status 127 are
+pinned against observations with real moonrun and equivalent native files.

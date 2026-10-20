@@ -8,7 +8,7 @@ import { createBrowserHost } from '../../src/hosts/browser/host.ts';
 import { runInWorker } from '../../src/hosts/browser/index.ts';
 import { type CommandContext, childExit } from '../../src/hosts/browser/process.ts';
 import { BrowserStdin } from '../../src/hosts/browser/streams.ts';
-import type { ChildProcess } from '../../src/ports/process.ts';
+import type { ChildProcess, SpawnRequest } from '../../src/ports/process.ts';
 import { fakeMount } from './mount-fakes.ts';
 
 const root = new URL('../../', import.meta.url);
@@ -174,7 +174,193 @@ function bridge(): () => Promise<void> {
   };
 }
 
+function spawnRequest(program: string): SpawnRequest {
+  return {
+    program,
+    argv: [program],
+    cwd: undefined,
+    env: [],
+    stdio: [{ kind: 'inherit' }, { kind: 'inherit' }, { kind: 'inherit' }],
+    extraFds: [],
+  };
+}
+
 describe('browser wasm processes with cli/sh 0.2.1', () => {
+  it('executes memory paths with spawn cwd, absolute paths, nested children and pipes', async () => {
+    stubAssets();
+    let stdout = '';
+    let stderr = '';
+    const host = await createBrowserHost({
+      execPaths: true,
+      files: {
+        'prog.wasm': bytes('true'),
+        '/bin/fail.wasm': bytes('false'),
+        'sub/prog.wasm': bytes('false'),
+        'shell.wasm': bytes('sh'),
+        '/bin/tr.wasm': bytes('tr'),
+      },
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+      stderr: (b) => {
+        stderr += new TextDecoder().decode(b);
+      },
+    });
+    expect(
+      await host.run(bytes('sh'), {
+        name: 'sh',
+        args: [
+          '-c',
+          './prog.wasm; echo $?; /bin/fail.wasm; echo $?; cd sub; ./prog.wasm; echo $?; ../shell.wasm -c "./prog.wasm; echo \\$?"; echo hello | /bin/tr.wasm a-z A-Z',
+        ],
+      }),
+    ).toEqual({ kind: 'completed' });
+    expect({ stdout, stderr }).toEqual({ stdout: '0\n1\n1\n1\nHELLO\n', stderr: '' });
+    expect(host.process.kill(999999, 0)).toEqual({ ok: false, error: { code: 'ESRCH' } });
+  });
+  it('defaults path execution on with a resolver, leaving bare names exclusively to it', async () => {
+    stubAssets();
+    const resolveCommand = vi.fn(async () => bytes('false'));
+    let stdout = '';
+    const host = await createBrowserHost({
+      files: { 'prog.wasm': bytes('true') },
+      resolveCommand,
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+    });
+    expect(
+      await host.run(bytes('sh'), {
+        args: ['-c', './prog.wasm; echo $?; prog.wasm; echo $?'],
+      }),
+    ).toEqual({ kind: 'completed' });
+    expect(stdout).toBe('0\n1\n');
+    expect(resolveCommand).toHaveBeenCalledExactlyOnceWith('prog.wasm', [], {
+      cwd: '/work',
+      env: { PWD: '/work' },
+    });
+  });
+  it('lets execPaths:false retain resolver ownership of slash-containing names', async () => {
+    stubAssets();
+    const resolveCommand = vi.fn(async () => bytes('false'));
+    const host = await createBrowserHost({
+      execPaths: false,
+      files: { 'prog.wasm': bytes('true') },
+      resolveCommand,
+    });
+    expect(await host.run(bytes('sh'), { args: ['-c', './prog.wasm'] })).toEqual({
+      kind: 'exited',
+      code: 1,
+    });
+    expect(resolveCommand).toHaveBeenCalledExactlyOnceWith('./prog.wasm', [], {
+      cwd: '/work',
+      env: { PWD: '/work' },
+    });
+  });
+  it('keeps processes unsupported without a resolver or path-execution capability', async () => {
+    stubAssets();
+    for (const options of [
+      {},
+      { mounts: {} },
+      { execPaths: false, mounts: { '/mnt': fakeMount({}).provider } },
+    ]) {
+      const host = await createBrowserHost({ ...options, files: { 'prog.wasm': bytes('true') } });
+      expect(await host.process.spawn(spawnRequest('./prog.wasm'))).toEqual({
+        ok: false,
+        error: { code: 'ENOSYS' },
+      });
+      expect(host.process.kill(999999, 0)).toEqual({ ok: false, error: { code: 'ENOSYS' } });
+    }
+    const host = await createBrowserHost({ execPaths: true, files: { prog: bytes('true') } });
+    expect(await host.process.spawn(spawnRequest('prog'))).toEqual({
+      ok: false,
+      error: { code: 'ENOSYS' },
+    });
+  });
+  for (const [name, contents, code, message] of [
+    ['text', 'not an executable\n', 'ENOEXEC', 'Exec format error'],
+    ['empty', '', 'ENOEXEC', 'Exec format error'],
+    ['short', '\0as', 'ENOEXEC', 'Exec format error'],
+    ['missing', undefined, 'ENOENT', 'No such file or directory'],
+    ['directory', null, 'EACCES', 'Permission denied'],
+  ] as const) {
+    it(`matches real moonrun's cli/sh error and status for a ${name} path`, async () => {
+      stubAssets();
+      let stdout = '';
+      let stderr = '';
+      const resolveCommand = vi.fn(async () => bytes('true'));
+      const host = await createBrowserHost({
+        files: contents === undefined ? {} : { [name]: contents },
+        resolveCommand,
+        stdout: (b) => {
+          stdout += new TextDecoder().decode(b);
+        },
+        stderr: (b) => {
+          stderr += new TextDecoder().decode(b);
+        },
+      });
+      expect(await host.process.spawn(spawnRequest(`./${name}`))).toEqual({
+        ok: false,
+        error: { code },
+      });
+      expect(await host.run(bytes('sh'), { args: ['-c', `./${name}; echo $?`] })).toEqual({
+        kind: 'completed',
+      });
+      // Verified with moonrun 0.1.20261012: cli/sh uses 127 for all spawn errors, not 126.
+      expect({ stdout, stderr }).toEqual({
+        stdout: '127\n',
+        stderr: `sh: OSError("@process.run(): ${message}")\n`,
+      });
+      expect(resolveCommand).not.toHaveBeenCalled();
+    });
+  }
+  it('defaults paths on for mounts alone and loads uncached wasm through Worker RPC with short reads', async () => {
+    const close = bridge();
+    const mount = fakeMount(
+      { 'prog.wasm': bytes('false'), bad: 'not wasm' },
+      { cache: false, delay: async () => new Promise((resolve) => setTimeout(resolve, 1)) },
+    );
+    let stdout = '';
+    let stderr = '';
+    const handle = runInWorker({
+      wasm: bytes('sh'),
+      args: ['-c', '/mnt/prog.wasm; echo $?; cd /mnt; ./prog.wasm; echo $?; ./bad; echo $?'],
+      mounts: {
+        '/mnt': {
+          ...mount.provider,
+          open: async (path) => {
+            const opened = await mount.provider.open(path);
+            if (!opened.ok) return opened;
+            return {
+              ok: true,
+              value: {
+                ...opened.value,
+                read: async (offset, length) => opened.value.read(offset, Math.min(length, 3)),
+              },
+            };
+          },
+        },
+      },
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+      stderr: (b) => {
+        stderr += new TextDecoder().decode(b);
+      },
+    });
+    try {
+      expect(await handle).toEqual({ kind: 'completed' });
+      expect({ stdout, stderr }).toEqual({
+        stdout: '1\n1\n127\n',
+        stderr: 'sh: OSError("@process.run(): Exec format error")\n',
+      });
+      expect(mount.calls.filter((c) => c.op === 'open')).toHaveLength(3);
+      expect(mount.calls.filter((c) => c.op === 'close')).toHaveLength(3);
+      expect(mount.calls.some((c) => c.op === 'read')).toBe(true);
+    } finally {
+      await close();
+    }
+  }, 15000);
   it('runs ls, cat and grep against delayed providers on the main thread, including nested mounts', async () => {
     const close = bridge();
     const delay = async () => new Promise<void>((resolve) => setTimeout(resolve, 1));
@@ -300,54 +486,60 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
     );
     expect(actual.stdout.length).toBe(input.length);
   }, 15000);
-  it('publishes increasing pids and SIGINT/SIGKILL wait completion with suspended I/O', async () => {
-    stubAssets();
-    const host = await createBrowserHost({ resolveCommand: async (name) => modules.get(name) });
-    const request = {
-      program: 'cat',
-      argv: ['cat'],
-      env: [],
-      cwd: undefined,
-      stdio: [{ kind: 'pipe' }, { kind: 'pipe' }, { kind: 'pipe' }] as const,
-      extraFds: [],
-    };
-    const children: ChildProcess[] = [];
-    try {
-      for (let i = 0; i < 2; i++) {
-        const result = await host.process.spawn(request);
-        if (!result.ok) throw new Error(result.error.code);
-        children.push(result.value);
-        if (i === 0) {
-          let received = false;
-          result.value.stdout?.onData(() => {
-            received = true;
-          });
-          expect(result.value.stdin?.write(new TextEncoder().encode('ready\n'))).toBe(true);
-          await until(() => received);
-        } else {
-          let received = false;
-          result.value.stdout?.onData(() => {
-            received = true;
-            result.value.stdout?.pause();
-          });
-          expect(result.value.stdin?.write(new Uint8Array(256 * 1024))).toBe(false);
-          await until(() => received);
+  for (const execPaths of [false, true]) {
+    it(`publishes increasing pids and SIGINT/SIGKILL wait completion (execPaths:${execPaths})`, async () => {
+      stubAssets();
+      const host = await createBrowserHost(
+        execPaths
+          ? { execPaths: true, files: { 'cat.wasm': bytes('cat') } }
+          : { resolveCommand: async (name) => modules.get(name) },
+      );
+      const request = {
+        program: execPaths ? './cat.wasm' : 'cat',
+        argv: ['cat'],
+        env: [],
+        cwd: undefined,
+        stdio: [{ kind: 'pipe' }, { kind: 'pipe' }, { kind: 'pipe' }] as const,
+        extraFds: [],
+      };
+      const children: ChildProcess[] = [];
+      try {
+        for (let i = 0; i < 2; i++) {
+          const result = await host.process.spawn(request);
+          if (!result.ok) throw new Error(result.error.code);
+          children.push(result.value);
+          if (i === 0) {
+            let received = false;
+            result.value.stdout?.onData(() => {
+              received = true;
+            });
+            expect(result.value.stdin?.write(new TextEncoder().encode('ready\n'))).toBe(true);
+            await until(() => received);
+          } else {
+            let received = false;
+            result.value.stdout?.onData(() => {
+              received = true;
+              result.value.stdout?.pause();
+            });
+            expect(result.value.stdin?.write(new Uint8Array(256 * 1024))).toBe(false);
+            await until(() => received);
+          }
+          result.value.stderr?.onData(() => {});
         }
-        result.value.stderr?.onData(() => {});
+        expect(children[1]?.pid).toBeGreaterThan(children[0]?.pid ?? 0);
+        for (const [index, child] of children.entries()) {
+          const signal = index === 0 ? 2 : 9;
+          expect(host.process.kill(child.pid, 0).ok).toBe(true);
+          const exited = new Promise((resolve) => child.onExit(resolve));
+          expect(host.process.kill(child.pid, signal).ok).toBe(true);
+          expect(await exited).toEqual({ kind: 'signaled', signal });
+          expect(host.process.kill(child.pid, 0)).toEqual({ ok: false, error: { code: 'ESRCH' } });
+        }
+      } finally {
+        for (const child of children) host.process.kill(child.pid, 9);
       }
-      expect(children[1]?.pid).toBeGreaterThan(children[0]?.pid ?? 0);
-      for (const [index, child] of children.entries()) {
-        const signal = index === 0 ? 2 : 9;
-        expect(host.process.kill(child.pid, 0).ok).toBe(true);
-        const exited = new Promise((resolve) => child.onExit(resolve));
-        expect(host.process.kill(child.pid, signal).ok).toBe(true);
-        expect(await exited).toEqual({ kind: 'signaled', signal });
-        expect(host.process.kill(child.pid, 0)).toEqual({ ok: false, error: { code: 'ESRCH' } });
-      }
-    } finally {
-      for (const child of children) host.process.kill(child.pid, 9);
-    }
-  });
+    });
+  }
   it('maps traps/host failures like the CLI, truncates exit codes, and accepts precompiled commands', async () => {
     expect(childExit({ kind: 'guest-failure', diagnostic: 'trap' })).toEqual({
       kind: 'exited',

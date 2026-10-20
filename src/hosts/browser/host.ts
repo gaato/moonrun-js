@@ -24,6 +24,8 @@ export interface BrowserHostOptions {
   /** A synchronous byte source (read into the buffer, return count), or finite input. Default EOF. */
   readonly stdin?: Uint8Array | BrowserStdin | ((buffer: Uint8Array) => number);
   readonly resolveCommand?: ResolveCommand;
+  /** Execute slash-containing paths from the VFS. Defaults on with a resolver or nonempty mounts. */
+  readonly execPaths?: boolean;
   /** WebSocket URL, including any relay authentication query. No relay means ENOSYS. */
   readonly relay?: string;
   /** DER roots for TrustSystemRoot. By default fetch the relay's /roots endpoint, or use none. */
@@ -69,10 +71,11 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     compile(new URL('./sqlite-engine.wasm', import.meta.url)),
     options.roots === undefined ? relayRoots(options.relay) : Promise.resolve(options.roots),
   ]);
-  const vfs =
-    options.mounts === undefined || Object.keys(options.mounts).length === 0
-      ? new MemoryVfs(options.files, options.cwd)
-      : new MountedVfs(options.files, options.cwd, options.mounts);
+  const hasMounts = options.mounts !== undefined && Object.keys(options.mounts).length > 0;
+  const execPaths = options.execPaths ?? (options.resolveCommand !== undefined || hasMounts);
+  const vfs = hasMounts
+    ? new MountedVfs(options.files, options.cwd, options.mounts)
+    : new MemoryVfs(options.files, options.cwd);
   let rootCwd = options.cwd ?? '/work';
   if (vfs instanceof MountedVfs) {
     const cwd = await vfs.files.async.realpath(rootCwd);
@@ -191,7 +194,7 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
         return port;
       },
       signals:
-        options.resolveCommand !== undefined || source instanceof BrowserStdin
+        execPaths || options.resolveCommand !== undefined || source instanceof BrowserStdin
           ? control.signals
           : {
               capture: () => () => {},
@@ -204,6 +207,7 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     };
     const port = browserProcess({
       resolver: options.resolveCommand,
+      execPaths,
       parent: host,
       io,
       vfs,

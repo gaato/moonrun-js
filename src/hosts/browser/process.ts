@@ -1,4 +1,4 @@
-import type { HostFd } from '../../ports/files.ts';
+import type { FilePort, HostFd } from '../../ports/files.ts';
 import type { ChildExit, ChildProcess, ProcessPort, SpawnRequest } from '../../ports/process.ts';
 import { err, type HostError, ok, type Result } from '../../ports/result.ts';
 import type { BrowserHost } from './host.ts';
@@ -58,16 +58,71 @@ export function childExit(outcome: Awaited<ReturnType<typeof runBrowserGuest>>):
 }
 export interface ProcessDeps {
   readonly resolver: ResolveCommand | undefined;
+  readonly execPaths: boolean;
   readonly parent: BrowserHost;
   readonly io: BrowserIo;
   readonly vfs: Pick<MemoryVfs, 'duplicate'>;
   readonly tree: ProcessTree;
   child(request: SpawnRequest, io: BrowserIo, control: BrowserControl, pid: number): BrowserHost;
 }
+
+/** Use the same async ports as filesystem jobs, including uncached mounted readers. */
+async function readExecutable(
+  files: FilePort,
+  path: string,
+  tree: ProcessTree,
+): Promise<Result<Uint8Array, HostError>> {
+  const stat = await files.async.statAt(undefined, path, true);
+  if (!stat.ok) return stat;
+  if (stat.value.kind !== 'file') return err({ code: 'EACCES' });
+  const opened = await files.async.open(path, {
+    access: 'read',
+    append: false,
+    create: false,
+    exclusive: false,
+    truncate: false,
+  });
+  if (!opened.ok) return opened;
+  const fd = opened.value;
+  try {
+    const magic = new Uint8Array([0, 97, 115, 109]);
+    const header = new Uint8Array(4);
+    for (let offset = 0; offset < header.length; ) {
+      if (treeClosed(tree)) return err({ code: 'EINTR' });
+      const read = await files.async.read(fd, header.subarray(offset));
+      if (!read.ok) return read;
+      if (read.value === 0) return err({ code: 'ENOEXEC' });
+      offset += read.value;
+    }
+    if (!header.every((byte, i) => byte === magic[i])) return err({ code: 'ENOEXEC' });
+    const chunks = [header];
+    let length = header.length;
+    for (;;) {
+      if (treeClosed(tree)) return err({ code: 'EINTR' });
+      const chunk = new Uint8Array(65536);
+      const read = await files.async.read(fd, chunk);
+      if (!read.ok) return read;
+      if (read.value === 0) break;
+      chunks.push(chunk.subarray(0, read.value));
+      length += read.value;
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return ok(bytes);
+  } finally {
+    files.close(fd);
+  }
+}
+
 export function browserProcess(deps: ProcessDeps): ProcessPort {
   return {
     spawn: async (request): Promise<Result<ChildProcess, HostError>> => {
-      if (deps.resolver === undefined) return err({ code: 'ENOSYS' });
+      const fromPath = deps.execPaths && request.program.includes('/');
+      if (!fromPath && deps.resolver === undefined) return err({ code: 'ENOSYS' });
       if (treeClosed(deps.tree)) return err({ code: 'EINTR' });
       if (request.extraFds.length > 0) return err({ code: 'ENOSYS' });
       const canonical = await deps.parent.files.async.realpath(request.cwd ?? '.');
@@ -78,10 +133,20 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
       if (kind.value.kind !== 'dir') return err({ code: 'ENOTDIR' });
       let wasm: Uint8Array | WebAssembly.Module | undefined;
       try {
-        wasm = await deps.resolver(request.program, request.argv.slice(1), {
-          cwd,
-          env: childEnvironment(request.env),
-        });
+        if (fromPath) {
+          // Preserve physical '..' / symlink traversal in the filesystem's async walker.
+          const path = request.program.startsWith('/')
+            ? request.program
+            : `${cwd}/${request.program}`;
+          const executable = await readExecutable(deps.parent.files, path, deps.tree);
+          if (!executable.ok) return executable;
+          wasm = executable.value;
+        } else {
+          wasm = await deps.resolver?.(request.program, request.argv.slice(1), {
+            cwd,
+            env: childEnvironment(request.env),
+          });
+        }
       } catch {
         return err({ code: 'EIO' });
       }
@@ -207,7 +272,7 @@ export function browserProcess(deps: ProcessDeps): ProcessPort {
       }
     },
     kill: (pid, signal) => {
-      if (deps.resolver === undefined) return err({ code: 'ENOSYS' });
+      if (!deps.execPaths && deps.resolver === undefined) return err({ code: 'ENOSYS' });
       const control = deps.tree.controls.get(pid);
       if (control === undefined) return err({ code: 'ESRCH' });
       if (signal === 0) return ok(undefined);
