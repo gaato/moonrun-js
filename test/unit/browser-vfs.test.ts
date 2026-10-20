@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryVfs } from '../../src/hosts/browser/vfs.ts';
 import type { OpenFlags } from '../../src/ports/files.ts';
 import type { HostError, Result } from '../../src/ports/result.ts';
@@ -21,6 +21,64 @@ function code<T>(r: Result<T, HostError>): string {
 }
 
 describe('browser memory VFS', () => {
+  it('removes memory trees without following contained symlinks and keeps open files alive', () => {
+    const vfs = new MemoryVfs({ 'tree/deep/a': 'old', outside: 'keep' });
+    value(vfs.files.symlink('/work/outside', '/work/tree/link'));
+    const fd = value(vfs.files.open('/work/tree/deep/a', { ...flags, create: false }));
+    value(vfs.memory({ kind: 'remove', path: '/work/tree', recursive: true }));
+    expect(code(vfs.files.stat('/work/tree'))).toBe('ENOENT');
+    expect(value(vfs.fs.readFile('/work/outside'))).toEqual(utf8.encode('keep'));
+    const b = new Uint8Array(3);
+    expect(value(vfs.files.read(fd, b))).toBe(3);
+    expect(b).toEqual(utf8.encode('old'));
+    expect(value(vfs.files.fstat(fd)).nlink).toBe(0n);
+    value(vfs.files.close(fd));
+  });
+  it('adds owned files with parents and replaces inodes without changing existing descriptors', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      const vfs = new MemoryVfs({ file: 'old content' });
+      const fd = value(vfs.files.open('/work/file', { ...flags, create: false }));
+      const oldStat = value(vfs.files.fstat(fd));
+      const b = new Uint8Array(16);
+      expect(value(vfs.files.read(fd, b.subarray(0, 4)))).toBe(4);
+      now.mockReturnValue(2000);
+      const bytes = utf8.encode('new content');
+      value(vfs.memory({ kind: 'writeFile', path: '/work/file', data: bytes }));
+      value(vfs.memory({ kind: 'writeFile', path: '/work/nested/parents/data', data: 'text' }));
+      bytes.fill(0);
+      expect(value(vfs.fs.readFile('/work/file'))).toEqual(utf8.encode('new content'));
+      expect(value(vfs.fs.readFile('/work/nested/parents/data'))).toEqual(utf8.encode('text'));
+      expect(value(vfs.files.read(fd, b))).toBe(7);
+      expect(new TextDecoder().decode(b.subarray(0, 7))).toBe('content');
+      expect(value(vfs.files.fstat(fd))).toEqual({ ...oldStat, nlink: 0n });
+      const fresh = value(await vfs.files.async.statAt(undefined, '/work/file', true));
+      expect(fresh.ino).not.toBe(oldStat.ino);
+      expect(fresh.mtimeNs).toBe(2000000000n);
+      value(vfs.files.write(fd, utf8.encode('!'), 0n));
+      expect(value(vfs.fs.readFile('/work/file'))).toEqual(utf8.encode('new content'));
+      value(vfs.files.close(fd));
+    } finally {
+      now.mockRestore();
+    }
+  });
+  it('rejects non-files and invalid paths, and follows parent symlinks', () => {
+    const vfs = new MemoryVfs({ directory: null });
+    value(vfs.files.symlink('/work/directory', '/work/alias'));
+    value(vfs.memory({ kind: 'writeFile', path: '/work/alias/new', data: 'data' }));
+    expect(value(vfs.fs.readFile('/work/directory/new'))).toEqual(utf8.encode('data'));
+    for (const path of ['relative', '/work/..', '/work/end/', '/work/nul\0'])
+      expect(code(vfs.memory({ kind: 'writeFile', path, data: 'data' }))).toBe('EINVAL');
+    expect(code(vfs.memory({ kind: 'writeFile', path: '/work/directory', data: 'file' }))).toBe(
+      'EISDIR',
+    );
+    expect(code(vfs.memory({ kind: 'writeFile', path: '/work/alias', data: 'file' }))).toBe(
+      'ELOOP',
+    );
+    expect(
+      code(vfs.memory({ kind: 'writeFile', path: '/work/null', data: null as unknown as string })),
+    ).toBe('EINVAL');
+  });
   it('preloads nested files/directories, copies byte ownership, and resolves a writable cwd', () => {
     const bytes = utf8.encode('hello');
     const { fs, files } = new MemoryVfs({ 'sub/a': bytes, empty: null });

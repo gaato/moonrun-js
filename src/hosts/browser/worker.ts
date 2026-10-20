@@ -6,6 +6,8 @@ import {
   type WorkerReply,
 } from './execute.ts';
 import type { BrowserSignalOptions } from './host.ts';
+import { type BrowserMemoryFs, dispatchMemoryFs } from './memory-fs.ts';
+import { mountError } from './mount-provider.ts';
 import { type MountValue, proxyMounts } from './mount-rpc.ts';
 import { BrowserStdin } from './streams.ts';
 
@@ -22,6 +24,32 @@ let nextRequest = 0;
 let started = false;
 let deliver: ((signal: number, options?: BrowserSignalOptions) => boolean) | undefined;
 const signals: Extract<WorkerMessage, { type: 'signal' }>[] = [];
+let memoryFs: BrowserMemoryFs | undefined;
+const filesystemCalls: Extract<WorkerMessage, { type: 'fs' }>[] = [];
+function filesystem(request: Extract<WorkerMessage, { type: 'fs' }>): void {
+  if (memoryFs === undefined) {
+    filesystemCalls.push(request);
+    return;
+  }
+  void dispatchMemoryFs(memoryFs, request.request).then(
+    (value) =>
+      scope.postMessage({ type: 'fs-result', id: request.id, result: { ok: true, value } }),
+    (e: unknown) => {
+      const error = mountError(e);
+      scope.postMessage({
+        type: 'fs-result',
+        id: request.id,
+        result: {
+          ok: false,
+          error: {
+            code: error.code,
+            message: e instanceof Error ? e.message : (error.message ?? error.code),
+          },
+        },
+      });
+    },
+  );
+}
 const mountCalls = new Map<number, (result: Result<MountValue, HostError>) => void>();
 function signal(request: Extract<WorkerMessage, { type: 'signal' }>): void {
   const delivered =
@@ -59,8 +87,10 @@ function start(request: BrowserRunRequest): void {
             }),
         }
       : {}),
-    ready: (dispatch) => {
+    ready: (dispatch, fs) => {
       deliver = dispatch;
+      memoryFs = fs;
+      for (const request of filesystemCalls.splice(0)) filesystem(request);
       for (const s of signals.splice(0)) signal(s);
     },
   });
@@ -85,6 +115,9 @@ scope.onmessage = ({ data }) => {
       break;
     case 'input-end':
       stdin.end();
+      break;
+    case 'fs':
+      filesystem(data);
       break;
     case 'signal':
       if (deliver === undefined) signals.push(data);

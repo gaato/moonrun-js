@@ -1,6 +1,15 @@
 import type { RunOutcome } from '../../engine/run.ts';
 import type { BrowserRunRequest, WorkerMessage, WorkerReply } from './execute.ts';
 import type { BrowserSignalOptions } from './host.ts';
+import {
+  type BrowserMemoryFs,
+  type MemoryFsCall,
+  type MemoryFsRequest,
+  type MemoryFsResults,
+  type MemoryFsValue,
+  memoryFilesystem,
+  memoryFsError,
+} from './memory-fs.ts';
 import type { BrowserMounts } from './mount-provider.ts';
 import { MountServer } from './mount-rpc.ts';
 import type { ResolveCommand } from './process.ts';
@@ -14,6 +23,7 @@ export {
   type BrowserSignalOptions,
   createBrowserHost,
 } from './host.ts';
+export type { BrowserMemoryEntry, BrowserMemoryFs, BrowserMemoryStat } from './memory-fs.ts';
 export type {
   BrowserMounts,
   MountEntry,
@@ -45,12 +55,16 @@ export interface WorkerRunOptions
 }
 /** Still awaitable as before; input methods are available immediately, before preparation finishes. */
 export interface BrowserRunHandle extends Promise<RunOutcome> {
+  readonly fs: BrowserMemoryFs;
   write(bytes: Uint8Array): Promise<void>;
   end(): void;
   signal(signal: number): void;
   signal(signal: number, options: BrowserSignalOptions): Promise<boolean>;
 }
 export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
+  let filesystem: MemoryFsCall = async () => {
+    throw memoryFsError({ code: 'EBADF', message: 'Worker unavailable' });
+  };
   let write: BrowserRunHandle['write'] = async () => {
     throw new Error('Worker unavailable');
   };
@@ -65,6 +79,10 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
     let id = 0;
     let writeTail = Promise.resolve();
     const inputs = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+    const filesystemCalls = new Map<
+      number,
+      { resolve: (value: MemoryFsValue) => void; reject: (e: Error) => void }
+    >();
     const signals = new Map<number, (delivered: boolean) => void>();
     const stop = (): void => {
       done = true;
@@ -72,6 +90,9 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
       mounts.close();
       for (const input of inputs.values()) input.reject(new Error('Run has ended'));
       inputs.clear();
+      for (const call of filesystemCalls.values())
+        call.reject(memoryFsError({ code: 'EBADF', message: 'Run has ended' }));
+      filesystemCalls.clear();
       for (const resolve of signals.values()) resolve(false);
       signals.clear();
     };
@@ -111,6 +132,13 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
             inputs.get(reply.id)?.resolve();
             inputs.delete(reply.id);
             break;
+          case 'fs-result': {
+            const call = filesystemCalls.get(reply.id);
+            filesystemCalls.delete(reply.id);
+            if (reply.result.ok) call?.resolve(reply.result.value);
+            else call?.reject(memoryFsError(reply.result.error));
+            break;
+          }
           case 'signal-ack':
             signals.get(reply.id)?.(reply.delivered);
             signals.delete(reply.id);
@@ -156,6 +184,28 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
         kind: 'host-failure',
         failure: { chain: ['browser Worker message could not be cloned'] },
       });
+    filesystem = <R extends MemoryFsRequest>(request: R) => {
+      if (done) return Promise.reject(memoryFsError({ code: 'EBADF', message: 'Run has ended' }));
+      const key = ++id;
+      return new Promise<MemoryFsResults[R['kind']]>((resolve, reject) => {
+        filesystemCalls.set(key, {
+          resolve: (value) => resolve(value as MemoryFsResults[R['kind']]),
+          reject,
+        });
+        try {
+          const owned =
+            request.kind === 'writeFile' && request.data instanceof Uint8Array
+              ? { ...request, data: request.data.slice() }
+              : request;
+          worker.postMessage({ type: 'fs', id: key, request: owned });
+        } catch (e) {
+          filesystemCalls.delete(key);
+          reject(
+            memoryFsError({ code: 'EINVAL', message: e instanceof Error ? e.message : String(e) }),
+          );
+        }
+      });
+    };
     write = (bytes) => {
       if (done || ended || options.stdin !== 'stream')
         return Promise.reject(new Error('stdin is not open for streaming'));
@@ -232,6 +282,7 @@ export function runInWorker(options: WorkerRunOptions): BrowserRunHandle {
     return signal(s, options);
   }
   return Object.assign(promise, {
+    fs: memoryFilesystem((request) => filesystem(request)),
     write: (b: Uint8Array) => write(b),
     end: () => end(),
     signal: sendSignal,

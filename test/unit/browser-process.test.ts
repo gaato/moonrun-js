@@ -806,6 +806,89 @@ describe('browser wasm processes with cli/sh 0.2.1', () => {
       await close();
     }
   }, 15000);
+  it('adds and replaces memory files while interactive sh runs, with acknowledgments before cat and exec', async () => {
+    const close = bridge();
+    let stdout = '';
+    let stderr = '';
+    const { provider } = fakeMount({});
+    const handle = runInWorker({
+      wasm: bytes('sh'),
+      name: 'sh',
+      args: ['-i'],
+      stdin: 'stream',
+      execPaths: true,
+      mounts: { '/mnt': provider },
+      resolveCommand: async (name) => modules.get(name),
+      stdout: (b) => {
+        stdout += new TextDecoder().decode(b);
+      },
+      stderr: (b) => {
+        stderr += new TextDecoder().decode(b);
+      },
+    });
+    try {
+      // The first request arrives while components are still being prepared.
+      const first = new TextEncoder().encode('first\n');
+      const preparing = Promise.all([
+        handle.fs.writeFile('/work/nested/parents/data', first),
+        handle.fs.writeFile('/work/prog.wasm', bytes('false')),
+      ]);
+      first.fill(0);
+      await preparing;
+      await until(() => (stdout + stderr).includes('$ '));
+      await handle.write(
+        new TextEncoder().encode(
+          'cat nested/parents/data; ./prog.wasm; echo $?; echo guest > /work/out.txt; echo DONE1\n',
+        ),
+      );
+      await until(() => stdout.includes('first\n1\nDONE1\n'));
+      expect(await handle.fs.readFile('/work/out.txt')).toEqual(
+        new TextEncoder().encode('guest\n'),
+      );
+      const stat = await handle.fs.stat('/work/out.txt');
+      expect(stat).toMatchObject({ kind: 'file', size: 6 });
+      expect(stat.mtimeMs).toBeGreaterThan(0);
+      expect(await handle.fs.readdir('/work')).toContainEqual({ name: 'out.txt', kind: 'file' });
+      await handle.fs.mkdir('/work/tree/deep', { recursive: true });
+      await handle.fs.writeFile('/work/tree/deep/extra', 'data');
+      await expect(handle.fs.remove('/work/tree')).rejects.toMatchObject({ code: 'ENOTEMPTY' });
+      await handle.fs.remove('/work/tree', { recursive: true });
+      await expect(handle.fs.stat('/work/tree/deep/extra')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await handle.fs.remove('/work/out.txt');
+      await expect(handle.fs.readFile('/work/out.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(handle.fs.writeFile('relative', 'invalid')).rejects.toMatchObject({
+        code: 'EINVAL',
+      });
+      await expect(handle.fs.writeFile('/mnt/file', 'invalid')).rejects.toMatchObject({
+        code: 'EROFS',
+      });
+      await handle.fs.writeFile('/work/nested/parents/data', 'second\n');
+      await handle.fs.writeFile('/work/prog.wasm', bytes('true'));
+      await handle.write(
+        new TextEncoder().encode('cat nested/parents/data; ./prog.wasm; echo $?; echo DONE2\n'),
+      );
+      await until(() => stdout.includes('second\n0\nDONE2\n'));
+      await handle.write(new TextEncoder().encode('exit\n'));
+      handle.end();
+      expect(await handle).toEqual({ kind: 'completed' });
+      expect(stderr).toBe('$ $ $ ');
+      await expect(handle.fs.writeFile('/work/late', 'invalid')).rejects.toMatchObject({
+        code: 'EBADF',
+      });
+      for (const operation of [
+        () => handle.fs.readFile('/work/prog.wasm'),
+        () => handle.fs.readdir('/work'),
+        () => handle.fs.stat('/work'),
+        () => handle.fs.mkdir('/work/late'),
+        () => handle.fs.remove('/work/prog.wasm'),
+      ])
+        await expect(operation()).rejects.toMatchObject({ code: 'EBADF' });
+    } finally {
+      await close();
+    }
+  }, 15000);
   it('does not count host stdio adapters as leaked guest descriptors', async () => {
     stubAssets();
     let stdout = '';

@@ -23,6 +23,33 @@ function value<T, E>(r: Result<T, E>): T {
   return r.value;
 }
 describe('async browser mounts', () => {
+  it('restricts live additions to memory, including physical parent symlinks and mount boundaries', () => {
+    const { provider, calls } = fakeMount({ file: 'provider' }, { cache: false });
+    const vfs = new MountedVfs(undefined, undefined, { '/mnt/local': provider });
+    take(vfs.files.symlink('/mnt/local', '/work/alias'));
+    for (const path of [
+      '/mnt/local/file',
+      '/mnt/local/new/file',
+      '/work/alias/file',
+      '/work/alias/../outside',
+    ]) {
+      expect(vfs.memory({ kind: 'writeFile', path, data: 'blocked' })).toEqual({
+        ok: false,
+        error: { code: 'EROFS' },
+      });
+    }
+    expect(calls).toEqual([]);
+    expect(
+      vfs.memory({ kind: 'writeFile', path: '/mnt/locality/new/file', data: 'memory' }),
+    ).toEqual(ok(undefined));
+    expect(text(take(vfs.fs.readFile('/mnt/locality/new/file')))).toBe('memory');
+    const rooted = new MountedVfs(undefined, undefined, { '/': provider });
+    expect(rooted.memory({ kind: 'writeFile', path: '/work/file', data: 'blocked' })).toEqual({
+      ok: false,
+      error: { code: 'EROFS' },
+    });
+    expect(calls).toEqual([]);
+  });
   it('preserves memory directory descriptors across rename and protects mount ancestors', async () => {
     const { provider } = fakeMount({ file: 'data' });
     const vfs = new MountedVfs({ 'old/file': 'memory' }, undefined, { '/mnt/local': provider });

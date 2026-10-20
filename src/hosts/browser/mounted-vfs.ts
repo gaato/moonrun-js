@@ -1,6 +1,7 @@
 import type { DirectoryReader, FilePort, FileStat, HostFd, OpenFlags } from '../../ports/files.ts';
 import type { FsPort } from '../../ports/fs.ts';
 import { err, type HostError, type HostErrorCode, ok, type Result } from '../../ports/result.ts';
+import type { MemoryFsRequest, MemoryFsValue } from './memory-fs.ts';
 import {
   type BrowserMounts,
   type MountEntry,
@@ -316,6 +317,10 @@ export class MountedVfs {
   }
   view(cwd: string): { fs: FsPort; files: FilePort } {
     return vfsView(this.fs, this.files, this.fs.resolve(cwd));
+  }
+  memory(request: MemoryFsRequest): Result<MemoryFsValue, HostError> {
+    // Check physical memory paths, including parent symlink traversal, without calling providers.
+    return this.#memory.memory(request, (path) => this.#mount(path) === undefined);
   }
   duplicate(fd: HostFd): Result<HostFd, HostError> {
     const copy = this.#memory.duplicate(fd);

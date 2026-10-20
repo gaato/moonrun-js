@@ -3,7 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteEngine } from '../../src/domains/sqlite/engine.ts';
-import { executeBrowserRun, type WorkerReply } from '../../src/hosts/browser/execute.ts';
+import {
+  executeBrowserRun,
+  type WorkerMessage,
+  type WorkerReply,
+} from '../../src/hosts/browser/execute.ts';
 import { createBrowserHost } from '../../src/hosts/browser/host.ts';
 import { runInWorker } from '../../src/hosts/browser/index.ts';
 import { take } from '../../src/hosts/browser/mount-provider.ts';
@@ -40,6 +44,122 @@ function stubAssets(): ReturnType<typeof vi.fn> {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser host under Node Web APIs', () => {
+  it('supports memory additions before a direct Run and rejects them after completion', async () => {
+    stubAssets();
+    const host = await createBrowserHost();
+    await host.memoryFs.writeFile('/work/new/parents/data', 'visible');
+    expect(host.fs.readFile('/work/new/parents/data')).toEqual({
+      ok: true,
+      value: new TextEncoder().encode('visible'),
+    });
+    expect(await host.memoryFs.readFile('/work/new/parents/data')).toEqual(
+      new TextEncoder().encode('visible'),
+    );
+    await expect(host.memoryFs.writeFile('relative', 'invalid')).rejects.toMatchObject({
+      code: 'EINVAL',
+    });
+    expect(await host.run(wat('wasi-exit'), { args: ['0'] })).toEqual({ kind: 'exited', code: 0 });
+    await expect(host.memoryFs.writeFile('/work/late', 'invalid')).rejects.toMatchObject({
+      code: 'EBADF',
+    });
+    await expect(host.memoryFs.readFile('/work/new/parents/data')).rejects.toMatchObject({
+      code: 'EBADF',
+    });
+  });
+  it('provides a live typed memory filesystem with directory, metadata and removal errors', async () => {
+    stubAssets();
+    const host = await createBrowserHost();
+    const fs = host.memoryFs;
+    await fs.mkdir('/work/dir');
+    await expect(fs.mkdir('/work/dir')).rejects.toMatchObject({ code: 'EEXIST' });
+    await expect(fs.mkdir('/work/missing/child')).rejects.toMatchObject({ code: 'ENOENT' });
+    const before = Date.now();
+    await fs.writeFile('/work/dir/a', 'hello');
+    expect(await fs.stat('/work/dir/a')).toMatchObject({ kind: 'file', size: 5 });
+    expect((await fs.stat('/work/dir/a')).mtimeMs).toBeGreaterThanOrEqual(before);
+    const owned = await fs.readFile('/work/dir/a');
+    owned.fill(0);
+    expect(await fs.readFile('/work/dir/a')).toEqual(new TextEncoder().encode('hello'));
+    await expect(fs.readFile('/work/dir')).rejects.toMatchObject({ code: 'EISDIR' });
+    await expect(fs.writeFile('/work/dir', 'bad')).rejects.toMatchObject({ code: 'EISDIR' });
+    await expect(fs.readdir('/work/dir/a')).rejects.toMatchObject({ code: 'ENOTDIR' });
+    await expect(fs.mkdir('/work/dir/a')).rejects.toMatchObject({ code: 'EEXIST' });
+    await expect(fs.mkdir('/work/dir/a/child', { recursive: true })).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    });
+    await expect(fs.remove('/work/dir')).rejects.toMatchObject({ code: 'ENOTEMPTY' });
+    take(host.files.symlink('/work/dir/a', '/work/dir/link'));
+    expect(await fs.readdir('/work/dir')).toEqual([
+      { name: 'a', kind: 'file' },
+      { name: 'link', kind: 'symlink' },
+    ]);
+    expect(await fs.stat('/work/dir/link')).toMatchObject({ kind: 'file', size: 5 });
+    expect(await fs.readFile('/work/dir/link')).toEqual(new TextEncoder().encode('hello'));
+    await fs.remove('/work/dir/link');
+    expect(await fs.readFile('/work/dir/a')).toEqual(new TextEncoder().encode('hello'));
+    take(host.fs.writeFile('/work/dir/a', new TextEncoder().encode('guest edit')));
+    expect(await fs.readFile('/work/dir/a')).toEqual(new TextEncoder().encode('guest edit'));
+    await fs.remove('/work/dir/a');
+    await fs.remove('/work/dir');
+    await expect(fs.stat('/work/dir')).rejects.toMatchObject({ code: 'ENOENT' });
+    await fs.mkdir('/work/tree/deep', { recursive: true });
+    await fs.mkdir('/work/tree/deep', { recursive: true });
+    await fs.writeFile('/work/tree/deep/a', 'data');
+    await fs.remove('/work/tree', { recursive: true });
+    await expect(fs.readFile('/work/tree/deep/a')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.remove('/work/missing')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.remove('/', { recursive: true })).rejects.toMatchObject({ code: 'EBUSY' });
+  });
+  it('rejects mount traversal and relative paths for every memory filesystem operation', async () => {
+    stubAssets();
+    const { provider, calls } = fakeMount({ file: 'provider' }, { cache: false });
+    const host = await createBrowserHost({ mounts: { '/mnt/local': provider } });
+    take(host.files.symlink('/mnt/local', '/work/alias'));
+    const fs = host.memoryFs;
+    const operations = [
+      (path: string) => fs.readFile(path),
+      (path: string) => fs.writeFile(path, 'data'),
+      (path: string) => fs.readdir(path),
+      (path: string) => fs.stat(path),
+      (path: string) => fs.mkdir(path),
+      (path: string) => fs.remove(path),
+    ];
+    for (const operation of operations) {
+      for (const path of ['/mnt/local/file', '/work/alias/file'])
+        await expect(operation(path)).rejects.toMatchObject({ code: 'EROFS' });
+      await expect(operation('relative')).rejects.toMatchObject({ code: 'EINVAL' });
+    }
+    await fs.writeFile('/mnt/sibling', 'keep');
+    await expect(fs.remove('/mnt', { recursive: true })).rejects.toMatchObject({ code: 'EROFS' });
+    expect(await fs.readFile('/mnt/sibling')).toEqual(new TextEncoder().encode('keep'));
+    await expect(fs.readFile('/work/alias')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(fs.remove('/work/alias')).rejects.toMatchObject({ code: 'EROFS' });
+    expect(calls).toEqual([]);
+    expect(await host.run(wat('wasi-exit'), { args: ['0'] })).toEqual({ kind: 'exited', code: 0 });
+    for (const operation of operations)
+      await expect(operation('/work/late')).rejects.toMatchObject({ code: 'EBADF' });
+  });
+  it('rejects pending file acknowledgments when the Worker ends', async () => {
+    class Worker {
+      onmessage: ((event: { data: WorkerReply }) => void) | null = null;
+      onerror = null;
+      onmessageerror = null;
+      postMessage(message: WorkerMessage): void {
+        if (message.type === 'run')
+          queueMicrotask(() =>
+            this.onmessage?.({ data: { type: 'outcome', outcome: { kind: 'completed' } } }),
+          );
+      }
+      terminate(): void {}
+    }
+    vi.stubGlobal('Worker', Worker);
+    const running = runInWorker({ wasm: new Uint8Array() });
+    const pending = expect(running.fs.writeFile('/work/pending', 'data')).rejects.toThrow(
+      'Run has ended',
+    );
+    expect(await running).toEqual({ kind: 'completed' });
+    await pending;
+  });
   it('canonicalizes a cwd reached through a mounted symlink', async () => {
     stubAssets();
     const { provider, memory } = fakeMount({ 'dir/file': 'data' });

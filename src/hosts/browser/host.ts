@@ -6,6 +6,13 @@ import type { RunOutcome } from '../../engine/run.ts';
 import type { Host } from '../../ports/host.ts';
 import type { SpawnRequest } from '../../ports/process.ts';
 import { ok } from '../../ports/result.ts';
+import {
+  type BrowserMemoryFs,
+  type MemoryFsRequest,
+  type MemoryFsResults,
+  memoryFilesystem,
+  memoryFsError,
+} from './memory-fs.ts';
 import type { BrowserMounts } from './mount-provider.ts';
 import { MountedVfs } from './mounted-vfs.ts';
 import { BrowserDns, browserNet } from './net.ts';
@@ -36,6 +43,8 @@ export interface BrowserSignalOptions {
 }
 export interface BrowserHost extends Host {
   readonly diagnostics: Diagnostics;
+  /** Async embedder facade; `fs` remains the core synchronous FsPort. */
+  readonly memoryFs: BrowserMemoryFs;
   run(
     wasm: Uint8Array | WebAssembly.Module,
     options?: { readonly name?: string; readonly args?: readonly string[] },
@@ -131,6 +140,17 @@ export async function createBrowserHost(options: BrowserHostOptions = {}): Promi
     const env = new Map(Object.entries(initialEnv));
     const dns = new BrowserDns();
     const host: BrowserHost = {
+      memoryFs: memoryFilesystem(async <R extends MemoryFsRequest>(request: R) => {
+        if (tree.closed || control.abort.signal.aborted)
+          throw memoryFsError({ code: 'EBADF', message: 'Run has ended' });
+        const result = vfs.memory(request);
+        if (!result.ok)
+          throw memoryFsError({
+            ...result.error,
+            message: `${request.kind} ${request.path}: ${result.error.code}`,
+          });
+        return result.value as MemoryFsResults[R['kind']];
+      }),
       diagnostics: new Diagnostics(diag, {
         readFile: (p) => {
           const r = view.fs.readFile(p);

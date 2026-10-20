@@ -63,21 +63,94 @@ A bundler used by an embedder must preserve/copy these assets and the module Wor
 compiles moonrun-diag, moonrun-policy, tls-engine and sqlite-engine, then returns a Host
 with synchronous cached component ports and a `diagnostics` instance for `compileBytes`.
 The Node CLI parser component is unnecessary. Run/guest compilation belongs in a Worker;
-Chrome restricts large synchronous module compilation on the main thread. Args go to
-`run(loaded, host, { args })`, rather than Host (the existing core contract).
+Chrome restricts large synchronous module compilation on the main thread. Use
+`host.run(bytesOrModule, {name, args})` for the browser Run's lifecycle checks.
 
 Host options additionally allow a synchronous stdin byte-source callback, `BrowserStdin`,
 cwd, and explicit DER `roots`. Output callbacks receive owned byte copies. `runInWorker`
 keeps callbacks on the main thread and sends cloneable messages to the Worker. Its return
-value remains an awaitable Promise of the existing `RunOutcome`, with input/signal methods
+value remains an awaitable Promise of the existing `RunOutcome`, with file/input/signal methods
 as described below; it terminates the Worker on outcomes and Worker errors.
-Output-callback/structured-clone exceptions reject its Promise after termination.
+Output-callback errors and failure to clone the initial run request reject its Promise
+after termination.
 
 With a relay, Host preparation fetches `/roots` using the same token query: a JSON array
 of base64 DER certificates from the relay machine's existing `nodeTrustStore` adapter
 (including its documented Node fallback, D24). An explicit `roots` array overrides this.
 Without a relay or explicit roots the system-root list is empty. TLS verification is
 never disabled. These are **not the browser's roots** (D44).
+
+## Live memory filesystem
+
+`runInWorker` returns a handle with `fs`; `createBrowserHost` exposes the same facade as
+`host.memoryFs`. The latter name leaves `host.fs` available as the existing synchronous
+core port. The exported `BrowserMemoryFs` interface has six async methods:
+
+```ts
+writeFile(path: string, data: Uint8Array | string): Promise<void>
+readFile(path: string): Promise<Uint8Array>
+readdir(path: string): Promise<BrowserMemoryEntry[]>
+stat(path: string): Promise<BrowserMemoryStat>
+mkdir(path: string, options?: { recursive?: boolean }): Promise<void>
+remove(path: string, options?: { recursive?: boolean }): Promise<void>
+```
+
+`BrowserMemoryEntry` is `{name, kind}`, using the existing `FileKind` values `file`, `dir`,
+`symlink` and `other`. `BrowserMemoryStat` is `{kind, size, mtimeMs}` with numeric byte
+size and millisecond mtime; stat follows symlinks. The facade covers the run's **memory
+VFS only**, shared live with the guest and all wasm children, without a separate mount.
+
+```ts
+// `running` is an interactive shell handle; filesystem execution needs execPaths enabled.
+await running.fs.writeFile('/work/uploads/input.txt', 'hello\n');
+await running.fs.writeFile('/work/prog.wasm', programBytes);
+await running.write(new TextEncoder().encode('cat uploads/input.txt; ./prog.wasm\n'));
+// After a guest command has finished writing an output file:
+const output = await running.fs.readFile('/work/out.txt');
+const entries = await running.fs.readdir('/work');
+await running.fs.mkdir('/work/scratch/deep', { recursive: true });
+await running.fs.remove('/work/scratch', { recursive: true });
+```
+
+Every path must be absolute. writeFile accepts UTF-8 strings or copied byte arrays,
+creates missing parents and installs a fresh regular-file inode with permissions 0666
+and current mtime. Existing descriptors retain their old inode, bytes and offset, like
+unlink followed by create; writes through an old descriptor do not alter the replacement.
+Final symlinks are rejected by writeFile (ELOOP); directories cannot be replaced (EISDIR).
+The ordinary 64 MiB memory-file limit applies. readFile returns an owned byte copy.
+
+mkdir defaults to nonrecursive creation: missing parents give ENOENT and existing entries
+EEXIST. Recursive mkdir accepts an existing directory and creates missing parents.
+remove deletes a file, symlink or empty directory; nonempty directories give ENOTEMPTY.
+Recursive remove deletes a tree without following contained symlinks. `/` cannot be
+removed (EBUSY). There is no batch API or implicit null/deletion value for writeFile.
+
+Memory parent symlinks are followed. Any path traversing a mount, including through a
+symlink or before a `..`, is rejected with EROFS without calling its provider. Recursive
+removal also rejects a memory tree containing actual mount points before deleting any
+entries. Parent listings can show synthetic mount-point names. Update mounted storage
+through its provider instead. A removable memory symlink is unlinked rather than deleting
+its target; a final symlink resolving into a mount is rejected too.
+
+Errors reject with an ordinary `Error` carrying a `code` from `HostError` (for example
+ENOENT, ENOTDIR, EISDIR, ENOTEMPTY, EEXIST or EINVAL). Relative paths give EINVAL.
+Failed calls do not end the Run. Parent directories created before a write failure may
+remain; operations do not provide rollback.
+
+Worker calls made during component preparation are queued. Each Promise resolves after
+its operation is applied, so await writeFile before issuing a guest command that uses it.
+All facade operations execute synchronously in the Worker's single JS thread and are
+serialized with guest filesystem accesses: completed guest writes are visible to the
+next facade read, and completed facade writes to the guest's next access, through both
+sync and async memory ports. There is no transaction across multiple calls; an already
+pending guest job may run before or after a facade request. A guest blocking the Worker's
+event loop delays messages and acknowledgments.
+
+**Lifetime choice:** the Worker still terminates when the Run finishes. All subsequent
+filesystem calls, including reads, reject with `code: 'EBADF'` / `Run has ended`; pending
+unacknowledged calls reject too. Read output files before exiting an interactive guest.
+`host.memoryFs` is available before and during `host.run`, and uses the same closed-state
+checks after `host.run` ends. No extra Worker lifetime or disposal API is introduced.
 
 ## Asynchronous filesystem mounts
 

@@ -1,6 +1,7 @@
 import type { RunOutcome } from '../../engine/run.ts';
 import type { HostError, Result } from '../../ports/result.ts';
 import { type BrowserHostOptions, type BrowserSignalOptions, createBrowserHost } from './host.ts';
+import type { BrowserMemoryFs, MemoryFsRequest, MemoryFsValue } from './memory-fs.ts';
 import type { BrowserMounts } from './mount-provider.ts';
 import type { MountCall, MountDescriptions, MountValue } from './mount-rpc.ts';
 import type { CommandContext, ResolveCommand } from './process.ts';
@@ -26,6 +27,11 @@ export type WorkerReply =
   | { readonly type: 'stdout' | 'stderr'; readonly bytes: Uint8Array }
   | { readonly type: 'outcome'; readonly outcome: RunOutcome }
   | { readonly type: 'input-ack'; readonly id: number }
+  | {
+      readonly type: 'fs-result';
+      readonly id: number;
+      readonly result: Result<MemoryFsValue, HostError>;
+    }
   | { readonly type: 'signal-ack'; readonly id: number; readonly delivered: boolean }
   | {
       readonly type: 'resolve';
@@ -43,6 +49,7 @@ export type WorkerMessage =
   | { readonly type: 'run'; readonly request: BrowserRunRequest }
   | { readonly type: 'input'; readonly id: number; readonly bytes: Uint8Array }
   | { readonly type: 'input-end' }
+  | { readonly type: 'fs'; readonly id: number; readonly request: MemoryFsRequest }
   | {
       readonly type: 'signal';
       readonly signal: number;
@@ -64,7 +71,10 @@ export async function executeBrowserRun(
     readonly stdin?: BrowserStdin;
     readonly resolveCommand?: ResolveCommand;
     readonly mounts?: BrowserMounts;
-    readonly ready?: (signal: (signal: number, options?: BrowserSignalOptions) => boolean) => void;
+    readonly ready?: (
+      signal: (signal: number, options?: BrowserSignalOptions) => boolean,
+      fs: BrowserMemoryFs,
+    ) => void;
   } = {},
 ): Promise<void> {
   let outcome: RunOutcome;
@@ -84,7 +94,7 @@ export async function executeBrowserRun(
       if (options !== undefined) return host.signal(signal, options);
       host.signal(signal);
       return true;
-    });
+    }, host.memoryFs);
     outcome = await host.run(request.wasm, {
       name: request.name ?? '/work/program.wasm',
       args: request.args ?? [],

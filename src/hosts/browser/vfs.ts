@@ -8,6 +8,7 @@ import type {
 } from '../../ports/files.ts';
 import type { FsPort } from '../../ports/fs.ts';
 import { err, type HostError, type HostErrorCode, ok, type Result } from '../../ports/result.ts';
+import type { MemoryFsRequest, MemoryFsValue } from './memory-fs.ts';
 
 /** null preloads a directory; strings are UTF-8. Parents are created automatically. */
 export type BrowserFiles = Readonly<Record<string, Uint8Array | string | null>>;
@@ -215,6 +216,110 @@ export class MemoryVfs {
     });
   }
 
+  /** Memory-only embedder operations; the mount overlay supplies a physical-path guard. */
+  memory(
+    request: MemoryFsRequest,
+    allowed?: (physicalPath: string) => boolean,
+  ): Result<MemoryFsValue, HostError> {
+    return attempt(() => {
+      const { path } = request;
+      if (!path.startsWith('/')) fail('EINVAL');
+      if (request.kind === 'writeFile') {
+        const value = request.data;
+        if (!path.startsWith('/') || path.endsWith('/')) fail('EINVAL');
+        if (typeof value !== 'string' && !(value instanceof Uint8Array)) fail('EINVAL');
+        const bytes = typeof value === 'string' ? encoder.encode(value) : value;
+        sizeOf(BigInt(bytes.length));
+        const parts = this.#parts(path);
+        const name = parts.pop();
+        if (name === undefined || name === '.' || name === '..') fail('EINVAL');
+        if (encoder.encode(name).length > 255) fail('ENAMETOOLONG');
+        const parentPath = `/${parts.join('/')}`;
+        this.#mkdirAll(parentPath, allowed);
+        const parent = this.#find(parentPath, true, allowed);
+        if (parent.entry.kind !== 'dir') fail('ENOTDIR');
+        if (allowed?.(`${parent.path === '/' ? '' : parent.path}/${name}`) === false) fail('EROFS');
+        const old = parent.entry.children.get(name);
+        if (old?.kind === 'dir') fail('EISDIR');
+        if (old?.kind === 'symlink') fail('ELOOP');
+        const entry = this.#entry('file');
+        if (entry.kind === 'file') entry.bytes = bytes.slice();
+        if (old !== undefined) old.nlink = 0n;
+        parent.entry.children.set(name, entry);
+        return;
+      }
+      if (request.kind === 'mkdir' && request.recursive) {
+        // Even '/' must pass the mount guard when there are no path components.
+        if (allowed?.('/') === false) fail('EROFS');
+        this.#mkdirAll(path, allowed);
+        return;
+      }
+      let found: { entry: Entry; path: string };
+      try {
+        found = this.#find(path, request.kind !== 'remove', allowed);
+      } catch (e) {
+        if (!(e instanceof VfsError) || e.code !== 'ENOENT' || request.kind !== 'mkdir') throw e;
+        const parts = this.#parts(path);
+        const name = parts.pop();
+        if (!name || name === '.' || name === '..') fail('EINVAL');
+        const parent = this.#find(`/${parts.join('/')}`, true, allowed);
+        if (parent.entry.kind !== 'dir') fail('ENOTDIR');
+        const target = `${parent.path === '/' ? '' : parent.path}/${name}`;
+        if (allowed?.(target) === false) fail('EROFS');
+        this.#mkdir(target);
+        return;
+      }
+      const { entry } = found;
+      switch (request.kind) {
+        case 'mkdir':
+          return fail('EEXIST');
+        case 'readFile':
+          if (entry.kind !== 'file') fail('EISDIR');
+          return entry.bytes.slice();
+        case 'readdir':
+          if (entry.kind !== 'dir') fail('ENOTDIR');
+          return [...entry.children].map(([name, child]) => ({ name, kind: child.kind }));
+        case 'stat': {
+          const stat = this.#stat(entry);
+          return {
+            kind: entry.kind,
+            size: Number(stat.size),
+            mtimeMs: Number(stat.mtimeNs / 1_000_000n),
+          };
+        }
+        case 'remove': {
+          if (entry.kind === 'symlink') {
+            try {
+              this.#find(path, true, allowed);
+            } catch (e) {
+              if (!(e instanceof VfsError) || e.code !== 'ENOENT') throw e;
+            }
+          }
+          if (!request.recursive || entry.kind !== 'dir') {
+            this.#remove(found.path, entry.kind === 'dir');
+            return;
+          }
+          const removed: Entry[] = [];
+          const visit = (e: Entry, p: string): void => {
+            if (allowed?.(p) === false) fail('EROFS');
+            removed.push(e);
+            if (e.kind === 'dir')
+              for (const [name, child] of e.children) visit(child, `${p === '/' ? '' : p}/${name}`);
+          };
+          // Validate the entire tree before unlinking anything, including nested mount points.
+          visit(entry, found.path);
+          const [parent, name] = this.#parent(found.path);
+          parent.children.delete(name);
+          for (const e of removed) {
+            e.nlink = 0n;
+            if (e.kind === 'dir') e.children.clear();
+          }
+          return;
+        }
+      }
+    });
+  }
+
   #now(): bigint {
     return BigInt(Date.now()) * 1_000_000n;
   }
@@ -228,10 +333,15 @@ export class MemoryVfs {
     if (p.includes('\0')) fail('EINVAL');
     return (p.startsWith('/') ? p : `${this.#cwd}/${p}`).split('/').filter(Boolean);
   }
-  #find(p: string, follow = true): { entry: Entry; path: string } {
+  #find(
+    p: string,
+    follow = true,
+    allowed?: (physicalPath: string) => boolean,
+  ): { entry: Entry; path: string } {
     if (p === '') fail('ENOENT');
     const todo = this.#parts(p);
     const stack: { entry: Entry; name: string }[] = [{ entry: this.#root, name: '' }];
+    if (allowed?.('/') === false) fail('EROFS');
     let links = 0;
     while (todo.length > 0) {
       const part = todo.shift() as string;
@@ -242,6 +352,8 @@ export class MemoryVfs {
         if (stack.length > 1) stack.pop();
         continue;
       }
+      if (allowed?.(`/${[...stack.slice(1).map((e) => e.name), part].join('/')}`) === false)
+        fail('EROFS');
       const e = parent.children.get(part);
       if (e === undefined) fail('ENOENT');
       if (e.kind === 'symlink' && (follow || todo.length > 0 || p.endsWith('/'))) {
@@ -335,12 +447,12 @@ export class MemoryVfs {
     if (parent.children.has(name)) fail('EEXIST');
     parent.children.set(name, this.#entry('dir', mode));
   }
-  #mkdirAll(p: string): void {
+  #mkdirAll(p: string, allowed?: (physicalPath: string) => boolean): void {
     let path = '';
     for (const part of this.#parts(p)) {
       path += `/${part}`;
       try {
-        this.#directory(path);
+        if (this.#find(path, true, allowed).entry.kind !== 'dir') fail('ENOTDIR');
       } catch (e) {
         if (!(e instanceof VfsError) || e.code !== 'ENOENT') throw e;
         this.#mkdir(path);
