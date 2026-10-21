@@ -62,6 +62,7 @@ API is not stable yet.
 ## Browser
 
 A Web API host and dedicated Worker runner are exported from `moonrun-js/browser`.
+Try it at <https://moonrun.gaa.to>: a shell running cli/sh and the cli/* commands from [moonbit-community/cmd](https://github.com/moonbit-community/cmd) in the browser.
 Embedders can mount asynchronous filesystem providers, including user-picked folders and OPFS; see [browser mounts](docs/browser.md#asynchronous-filesystem-mounts).
 From a checkout, start the local demo with:
 
