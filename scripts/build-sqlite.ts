@@ -25,7 +25,7 @@ const output = path.join(repoRoot, 'src/domains/sqlite/sqlite-engine.wasm');
 const check = process.argv.includes('--check');
 const sysroot = process.env['WASI_SYSROOT'] ?? '/usr/share/wasi-sysroot';
 
-// moon 748b63c Cargo.lock: libsqlite3-sys 0.38.2, checksum = SHA-256 of the .crate.
+// moon 1af328f Cargo.lock: libsqlite3-sys 0.38.2, checksum = SHA-256 of the .crate.
 const CRATE = {
   name: 'libsqlite3-sys-0.38.2',
   url: 'https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.38.2.crate',

@@ -1,7 +1,7 @@
 # moonrun-js
 
 TypeScript reimplementation of MoonBit's `moonrun`. Compatibility with the installed
-moonrun (`0.1.20261012`, moon commit `748b63c`) is the yardstick: same wasm, same
+moonrun (`0.1.20261016`, moon commit `1af328f`) is the yardstick: same wasm, same
 stdout/stderr/exit.
 
 - Design and phases: `docs/plan.md`. Spike results: `docs/spikes.md`. Known differences: `docs/divergences.md`.

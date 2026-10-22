@@ -186,7 +186,7 @@ export async function run(
     const message = `moonrun Runtime leaked host state: ${leaks.join(', ')}`;
     stdio.flushStdout();
     stdio.writeStderrText(
-      `\nthread 'main' (${host.platform.pid}) panicked at crates/moonrun/src/runtime/mod.rs:256:13:\n${message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace\n`,
+      `\nthread 'main' (${host.platform.pid}) panicked at crates/moonrun/src/runtime/mod.rs:271:13:\n${message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace\n`,
     );
     return { kind: 'panicked', message };
   };

@@ -15,7 +15,7 @@ const metadata = JSON.parse(
   readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
 export const VERSION = metadata.version;
-const COMPAT = 'compat moonrun 0.1.20261012 748b63c';
+const COMPAT = 'compat moonrun 0.1.20261016 1af328f';
 
 /** anyhow's `{:?}` rendering of an error chain, as printed by moonrun's `main`. */
 export function formatErrorChain(chain: readonly string[]): string {

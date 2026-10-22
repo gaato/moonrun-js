@@ -1,5 +1,5 @@
 //! One TLS connection driven through moonrun's contract
-//! (`crates/moonrun/src/async_host/tls/openssl.rs` at 748b63c): every call
+//! (`crates/moonrun/src/async_host/tls/openssl.rs` at 1af328f): every call
 //! receives the encrypted input and output slices, then reports
 //! `bytes_read`, `bytes_to_write`, `wants_read` and `wants_write`.
 //!

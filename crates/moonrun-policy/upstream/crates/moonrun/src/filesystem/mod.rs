@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@748b63c25261be2ec38b2cc70884d5894a456360 crates/moonrun/src/filesystem/mod.rs (rewrites: std-os ×6, path-method ×3, std-fs ×38)
+// upstream: moonbitlang/moon@1af328fbbacb977b813a5c7b193a63b065b6f49e crates/moonrun/src/filesystem/mod.rs (rewrites: std-os ×8, resolved-method ×3, std-fs ×44)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -100,6 +100,14 @@ pub(crate) struct HostFs {
 }
 
 impl HostFs {
+    pub(crate) fn resolve_path(&self, path: &OsStr) -> OsString {
+        self.working_directory.resolve_path(path)
+    }
+
+    fn resolved(&self, path: &str) -> PathBuf {
+        self.resolve_path(OsStr::new(path)).into()
+    }
+
     pub(crate) fn new(
         policy: Option<FsPolicy>,
         environment: Arc<Env>,
@@ -133,7 +141,7 @@ impl HostFs {
 
     pub(crate) fn read_file_to_string(&self, path: &str) -> Result<String, HostFsError> {
         self.ensure_read(path)?;
-        crate::os::fs::read_to_string(path)
+        crate::os::fs::read_to_string(self.resolved(path))
             .map_err(|_| HostFsError::operation(format!("Failed to read file: {path}")))
     }
 
@@ -143,7 +151,7 @@ impl HostFs {
         contents: &str,
     ) -> Result<(), HostFsError> {
         self.ensure_write(path)?;
-        crate::os::fs::write(path, contents)
+        crate::os::fs::write(self.resolved(path), contents)
             .map_err(|_| HostFsError::operation(format!("Failed to write file: {path}")))
     }
 
@@ -158,44 +166,44 @@ impl HostFs {
         self.ensure_write(path)?;
         // Decode guest-owned contents only after authorization, matching the
         // existing import's observable failure order for untrusted guests.
-        crate::os::fs::write(path, contents()?)
+        crate::os::fs::write(self.resolved(path), contents()?)
             .map_err(|_| HostFsError::operation(format!("Failed to write file: {path}")).into())
     }
 
     pub(crate) fn create_dir(&self, path: &str) -> Result<(), HostFsError> {
         self.ensure_write(path)?;
-        crate::os::fs::create_dir_all(path)
+        crate::os::fs::create_dir_all(self.resolved(path))
             .map_err(|_| HostFsError::operation(format!("Failed to create directory: {path}")))
     }
 
     pub(crate) fn read_dir(&self, path: &str) -> Result<Vec<String>, HostFsError> {
         self.ensure_read(path)?;
-        read_dir_entries(path)
+        read_dir_entries(&self.resolved(path))
             .map_err(|_| HostFsError::operation(format!("Failed to read directory: {path}")))
     }
 
     pub(crate) fn is_file(&self, path: &str) -> bool {
-        self.ensure_read(path).is_ok() && crate::os::path::is_file(Path::new(path))
+        self.ensure_read(path).is_ok() && crate::os::path::is_file(&self.resolved(path))
     }
 
     pub(crate) fn is_dir(&self, path: &str) -> bool {
-        self.ensure_read(path).is_ok() && crate::os::path::is_dir(Path::new(path))
+        self.ensure_read(path).is_ok() && crate::os::path::is_dir(&self.resolved(path))
     }
 
     pub(crate) fn remove_file(&self, path: &str) -> Result<(), HostFsError> {
         self.ensure_remove(path)?;
-        crate::os::fs::remove_file(path)
+        crate::os::fs::remove_file(self.resolved(path))
             .map_err(|_| HostFsError::operation(format!("Failed to remove file: {path}")))
     }
 
     pub(crate) fn remove_dir(&self, path: &str) -> Result<(), HostFsError> {
         self.ensure_remove(path)?;
-        crate::os::fs::remove_dir_all(path)
+        crate::os::fs::remove_dir_all(self.resolved(path))
             .map_err(|_| HostFsError::operation(format!("Failed to remove directory: {path}")))
     }
 
     pub(crate) fn path_exists(&self, path: &str) -> bool {
-        self.ensure_read(path).is_ok() && crate::os::path::exists(Path::new(path))
+        self.ensure_read(path).is_ok() && crate::os::path::exists(&self.resolved(path))
     }
 
     pub(crate) fn current_dir(&self) -> String {
@@ -216,7 +224,7 @@ impl HostFs {
         path: &str,
     ) -> i32 {
         let result = self.ensure_read(path).and_then(|()| {
-            crate::os::fs::read(path).map_err(|error| {
+            crate::os::fs::read(self.resolved(path)).map_err(|error| {
                 HostFsError::operation(format!("Failed to read file {path}: {error}"))
             })
         });
@@ -241,7 +249,7 @@ impl HostFs {
             .ensure_write(path)
             .and_then(|()| contents().map_err(HostFsError::operation))
             .and_then(|contents| {
-                crate::os::fs::write(path, contents).map_err(|error| {
+                crate::os::fs::write(self.resolved(path), contents).map_err(|error| {
                     HostFsError::operation(format!("Failed to write file {path}: {error}"))
                 })
             });
@@ -250,7 +258,7 @@ impl HostFs {
 
     pub(crate) fn create_dir_new(&self, results: &mut FsOperationResults, path: &str) -> i32 {
         let result = self.ensure_write(path).and_then(|()| {
-            crate::os::fs::create_dir_all(path).map_err(|error| {
+            crate::os::fs::create_dir_all(self.resolved(path)).map_err(|error| {
                 HostFsError::operation(format!("Failed to create directory {path}: {error}"))
             })
         });
@@ -259,7 +267,7 @@ impl HostFs {
 
     pub(crate) fn read_dir_new(&self, results: &mut FsOperationResults, path: &str) -> i32 {
         let result = self.ensure_read(path).and_then(|()| {
-            read_dir_entries(path).map_err(|error| {
+            read_dir_entries(&self.resolved(path)).map_err(|error| {
                 HostFsError::operation(format!("Failed to read directory {path}: {error}"))
             })
         });
@@ -282,7 +290,7 @@ impl HostFs {
 
     pub(crate) fn remove_file_new(&self, results: &mut FsOperationResults, path: &str) -> i32 {
         let result = self.ensure_remove(path).and_then(|()| {
-            crate::os::fs::remove_file(path).map_err(|error| {
+            crate::os::fs::remove_file(self.resolved(path)).map_err(|error| {
                 HostFsError::operation(format!("Failed to remove file {path}: {error}"))
             })
         });
@@ -291,7 +299,7 @@ impl HostFs {
 
     pub(crate) fn remove_dir_new(&self, results: &mut FsOperationResults, path: &str) -> i32 {
         let result = self.ensure_remove(path).and_then(|()| {
-            crate::os::fs::remove_dir_all(path).map_err(|error| {
+            crate::os::fs::remove_dir_all(self.resolved(path)).map_err(|error| {
                 HostFsError::operation(format!("Failed to remove directory {path}: {error}"))
             })
         });
@@ -305,7 +313,7 @@ impl HostFs {
         kind: fn(&crate::os::fs::Metadata) -> bool,
     ) -> i32 {
         let result = self.ensure_read(path).and_then(|()| {
-            crate::os::fs::metadata(path)
+            crate::os::fs::metadata(self.resolved(path))
                 .map(|metadata| i32::from(kind(&metadata)))
                 .map_err(|error| HostFsError::operation(format!("{error}: {path}")))
         });
@@ -425,9 +433,10 @@ impl HostFs {
         };
         let target = quote_os_str(path);
         let resolved = self
-            .resolve_from_working_directory(Path::new(path))
-            .and_then(|path| canonicalize_existing_prefix(&path))
-            .ok();
+            .working_directory
+            .resolve_absolute(Path::new(path))
+            .ok()
+            .and_then(|path| canonicalize_existing_prefix(&path).ok());
         policy.authorize(resolved.as_deref(), intents, &target)
     }
 
@@ -437,20 +446,11 @@ impl HostFs {
         };
         let target = quote_os_str(path);
         let resolved = self
-            .resolve_from_working_directory(Path::new(path))
-            .and_then(|path| canonicalize_entry_path(&path))
-            .ok();
+            .working_directory
+            .resolve_absolute(Path::new(path))
+            .ok()
+            .and_then(|path| canonicalize_entry_path(&path).ok());
         policy.authorize(resolved.as_deref(), intents, &target)
-    }
-
-    fn resolve_from_working_directory(&self, path: &Path) -> AsyncHostResult<PathBuf> {
-        if path.is_absolute() {
-            Ok(path.to_path_buf())
-        } else {
-            self.working_directory
-                .resolve(path)
-                .map_err(|_| AsyncHostError::PermissionDenied)
-        }
     }
 
     fn ensure_read(&self, path: &str) -> Result<(), HostFsError> {
@@ -525,7 +525,7 @@ fn authorization_target_at(base: Option<&Path>, path: &OsStr) -> String {
     )
 }
 
-fn read_dir_entries(path: &str) -> std::io::Result<Vec<String>> {
+fn read_dir_entries(path: &Path) -> std::io::Result<Vec<String>> {
     Ok(crate::os::fs::read_dir(path)?
         .filter_map(Result::ok)
         .filter_map(|entry| {
@@ -563,6 +563,57 @@ mod tests {
             environment,
             Arc::new(WorkingDirectory::Ambient),
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_enumeration_does_not_substitute_lossy_path() {
+        use crate::os::unix::ffi::OsStrExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let directory = tmp.path().join(OsStr::from_bytes(b"workspace-\xff"));
+        let lossy_directory = PathBuf::from(directory.to_string_lossy().into_owned());
+        crate::os::fs::create_dir(&lossy_directory).unwrap();
+        crate::os::fs::write(lossy_directory.join("wrong.txt"), []).unwrap();
+        let host = HostFs::new(
+            None,
+            Arc::new(Env::ambient()),
+            Arc::new(WorkingDirectory::Fixed(directory)),
+        );
+
+        let legacy_result = host.read_dir(".");
+        let mut results = FsOperationResults::default();
+        assert_eq!(host.read_dir_new(&mut results, "."), -1);
+        assert!(legacy_result.is_err());
+        assert!(results.dir_files().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn directory_enumeration_preserves_non_utf8_working_directory() {
+        use crate::os::unix::ffi::OsStrExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let directory = tmp.path().join(OsStr::from_bytes(b"workspace-\xff"));
+        let lossy_directory = PathBuf::from(directory.to_string_lossy().into_owned());
+        crate::os::fs::create_dir(&directory).unwrap();
+        crate::os::fs::create_dir(&lossy_directory).unwrap();
+        crate::os::fs::write(directory.join("expected.txt"), []).unwrap();
+        crate::os::fs::write(lossy_directory.join("wrong.txt"), []).unwrap();
+        let host = HostFs::new(
+            None,
+            Arc::new(Env::ambient()),
+            Arc::new(WorkingDirectory::Fixed(directory)),
+        );
+
+        let legacy_entries = host.read_dir(".").unwrap();
+        let mut results = FsOperationResults::default();
+        assert_eq!(host.read_dir_new(&mut results, "."), 0);
+        let expected = ["expected.txt".to_owned()];
+        assert_eq!(
+            (legacy_entries.as_slice(), results.dir_files()),
+            (expected.as_slice(), expected.as_slice())
+        );
     }
 
     #[test]

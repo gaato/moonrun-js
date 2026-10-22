@@ -135,6 +135,44 @@ ${lines.join('\n')}
 `;
 }
 
+/**
+ * The sqlite registry registers each import with `registry.func_wrap(MODULE, "symbol",
+ * |caller, name: type, ...| ...)`. The closure's return type is inferred by rustc and not
+ * written down, so a symbol's result type is carried over from the committed table; a
+ * symbol that is not in it yet has to be added there by hand (read its implementation).
+ */
+function parseSqliteRegistry(source: string): Entry[] {
+  const committed = readFileSync(path.join(repoRoot, 'src/generated/sqlite-imports.ts'), 'utf8');
+  const results = new Map<string, string>();
+  for (const m of committed.matchAll(
+    /(\w+): \{\s*kind: 'sqlite',[\s\S]*?result: '(\w+)',?\s*\}/g,
+  )) {
+    results.set(m[1] ?? '', m[2] ?? '');
+  }
+  const re =
+    /registry\.func_wrap\(\s*MOONBIT_SQLITE_MODULE,\s*"(\w+)",\s*\|\s*(?:_?caller): Caller<'_, Runtime>([^|]*)\|/g;
+  const entries: Entry[] = [];
+  for (const m of source.matchAll(re)) {
+    const [, symbol = '', rest = ''] = m;
+    const params = rest
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p !== '')
+      .map((p) => {
+        const [name = '', type = ''] = p.split(':').map((x) => x.trim());
+        return [name, type] as const;
+      });
+    const result = results.get(symbol);
+    if (result === undefined) {
+      throw new Error(
+        `new sqlite import ${symbol}: add its result type to src/generated/sqlite-imports.ts`,
+      );
+    }
+    entries.push({ kind: 'sqlite', callback: symbol, params, result, symbol });
+  }
+  return entries;
+}
+
 const outputs: Array<readonly [string, string]> = [];
 {
   const file = 'crates/moonrun/src/async_api/registry.rs';
@@ -146,7 +184,7 @@ const outputs: Array<readonly [string, string]> = [];
 }
 {
   const file = 'crates/moonrun/src/sqlite/wasm/registry.rs';
-  const entries = parseEntries(macroBody(show(file), 'declare_sqlite_imports'), false);
+  const entries = parseSqliteRegistry(show(file));
   outputs.push([
     'src/generated/sqlite-imports.ts',
     emit('SQLITE', 'moonbitlang/sqlite', entries, file),

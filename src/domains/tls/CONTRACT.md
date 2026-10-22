@@ -1,6 +1,6 @@
-# TLS contract (moonrun 748b63c, Linux)
+# TLS contract (moonrun 1af328f, Linux)
 
-Sources: `crates/moonrun/src/` at 748b63c — `async_api/tls.rs` (import shims, `AT`),
+Sources: `crates/moonrun/src/` at 1af328f — `async_api/tls.rs` (import shims, `AT`),
 `async_host/mod.rs` (handle table, `MOD`), `async_host/tls/mod.rs` (`TLS`),
 `async_host/tls/openssl.rs` (`OSSL`). Guest side: moonbitlang/async 777da33
 `src/tls/tls.wasm.mbt` (`MBT`). `TlsSession` (session.ts) implements the handle
@@ -20,7 +20,7 @@ level, `crates/tls-engine` (conn.rs) the connection level.
   counters, false for the wants, null buffers for the certificate and bindings.
 - `take_error` returns and clears the last error, `"unknown TLS error"` when
   none (MOD 3756-3768). `tls/error/take_global` is always `"unknown TLS error"`:
-  the field is never written at 748b63c (MOD 1101, 1149, 3770-3777).
+  the field is never written at 1af328f (MOD 1101, 1149, 3770-3777).
 
 ## Configuration
 - `set_client(host: UTF-16, sni: i32 != 0, trust)`. Trust ABI 0 no

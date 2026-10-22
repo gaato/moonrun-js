@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@748b63c25261be2ec38b2cc70884d5894a456360 crates/moonrun/src/policy/net.rs (rewrites: none)
+// upstream: moonbitlang/moon@1af328fbbacb977b813a5c7b193a63b065b6f49e crates/moonrun/src/policy/net.rs (rewrites: none)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //

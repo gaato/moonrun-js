@@ -4,7 +4,7 @@
 
 ## 決定
 
-| 対象（moon 748b63c） | 判定 | 根拠 | 置き換える TS |
+| 対象（moon 1af328f） | 判定 | 根拠 | 置き換える TS |
 |---|---|---|---|
 | `policy/**`、`runtime/environment*.rs`、moonutil `front_matter.rs` | 流用する | 本家と 164/164 一致（TS は `.mbtx` の 7 件で不一致）。上流の変更が多い | `src/domains/policy/*`、`src/hosts/node/policy-loader.ts` の大半 |
 | `filesystem/mod.rs`、`runtime/working_directory.rs`（Host Filesystem） | 流用する（下の 3 点を直してから） | 上流の変更が多い（2026-06 以降 26 回）。ポリシー判定と一体 | `src/abi/legacy/fs-unstable.ts`・`fs-runtime.ts` の OS 以外の部分、ポリシーのパス解決 |

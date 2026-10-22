@@ -5,7 +5,7 @@
 //! `mod job;` and re-exports `job::Job`, so that name is the bridge: as a child of
 //! `filesystem` this module can reach `HostFs`'s private `authorize_*` checks.
 //! `Job` here keeps only what `Job::check_policy` looks at, and `check_policy` with its
-//! helpers mirrors upstream `filesystem/job/mod.rs:423-473,824-852` (moon 748b63c);
+//! helpers mirrors upstream `filesystem/job/mod.rs:455-505,856-884` (moon 1af328f);
 //! keep the mapping in step when the pin moves.
 
 use std::ffi::{OsStr, OsString};

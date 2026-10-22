@@ -5,6 +5,10 @@
       "from": "\\bstd::os::(unix|fd)::",
       "to": "crate::os::$1::"
     },
+    "resolved-method": {
+      "from": "\\bself\\.resolved\\(([a-z_]+)\\)\\.(is_file|is_dir|exists)\\(\\)",
+      "to": "crate::os::path::$2(&self.resolved($1))"
+    },
     "path-method": {
       "from": "\\bPath::new\\(([a-z_]+)\\)\\.(is_file|is_dir|exists)\\(\\)",
       "to": "crate::os::path::$2(Path::new($1))"
@@ -104,16 +108,16 @@
       "crate": "moonrun-policy",
       "path": "crates/moonrun/src/runtime/working_directory.rs",
       "rewrites": {
-        "std-env": 3
+        "std-env": 4
       }
     },
     {
       "crate": "moonrun-policy",
       "path": "crates/moonrun/src/filesystem/mod.rs",
       "rewrites": {
-        "std-os": 6,
-        "path-method": 3,
-        "std-fs": 38
+        "std-os": 8,
+        "resolved-method": 3,
+        "std-fs": 44
       }
     },
     {

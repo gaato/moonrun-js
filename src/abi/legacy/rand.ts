@@ -17,6 +17,6 @@ export const rand: ImportFamily = (ctx) => ({
   }),
 });
 
-// moonrun 0.1.20261012 is built against rand 0.8.6 on GitHub's runners.
+// moonrun 0.1.20261016 is built against rand 0.8.6 on GitHub's runners.
 const RAND_EMPTY_RANGE_LOCATION =
   '/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rand-0.8.6/src/rng.rs:134:9';
