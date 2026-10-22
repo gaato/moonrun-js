@@ -1,7 +1,7 @@
 # 開発用ツール。Node は 24 が下限(engines)、開発は最新で行う。
 # Rust は RPM の rust(wasm32-unknown-unknown 同梱)を使うのでここでは管理しない。
 [tools]
-node = "26.11.1"
+node = "26.12.1"
 deno = "2.9.7"
 bun = "1.4.2"
 pnpm = "12.3.4"
