@@ -2,7 +2,19 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":timezone(Asia/Tokyo)"],
   "schedule": ["before 9am on monday"],
+  "lockFileMaintenance": {
+    "description": "Vulnerability PRs only fix direct dependencies; a daily lock file refresh lands transitive fixes within a day.",
+    "enabled": true,
+    "schedule": ["before 6am"]
+  },
   "packageRules": [
+    {
+      "description": "Merge lock file maintenance once CI passes; it leaves declared ranges alone.",
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": false
+    },
     {
       "description": "Merge non-major GitHub Actions updates once CI passes; runtimes and the MoonBit pin move the compatibility baseline, so they stay manual.",
       "matchManagers": ["github-actions"],
