@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/moonrun-js)](https://www.npmjs.com/package/moonrun-js)
 [![CI](https://github.com/gaato/moonrun-js/actions/workflows/ci.yml/badge.svg)](https://github.com/gaato/moonrun-js/actions/workflows/ci.yml)
-[![compat: moonrun 0.1.20261016](https://img.shields.io/badge/compat-moonrun%200.1.20261016-blue)](docs/divergences.md)
+[![compat: moonrun 0.1.20261023](https://img.shields.io/badge/compat-moonrun%200.1.20261023-blue)](docs/divergences.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gaato/moonrun-js)
 [![License](https://img.shields.io/github/license/gaato/moonrun-js)](LICENSE)
 
@@ -12,7 +12,7 @@ or `--target wasm-gc` that run under `moonrun` run on Node.js, Deno and Bun, inc
 that use `moonbitlang/async` (files, processes, signals, TCP/UDP, DNS, TLS) and
 `moonbitlang/sqlite`.
 
-The yardstick is the real `moonrun` 0.1.20261016 (moon `1af328f`): the same wasm should
+The yardstick is the real `moonrun` 0.1.20261023 (moon `3778465`): the same wasm should
 produce the same stdout, stderr and exit status. Known differences are listed with IDs in
 [docs/divergences.md](docs/divergences.md).
 
