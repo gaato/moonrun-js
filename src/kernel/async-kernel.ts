@@ -9,7 +9,7 @@ import { type AsyncError, BADF, FAULT, INVAL, IO, native } from './errors.ts';
 import {
   type FdKind,
   FileLocks,
-  fdKindOfMode,
+  fdKindOfStat,
   fileKindCode,
   HostFile,
   inodeKey,
@@ -383,7 +383,7 @@ export class AsyncKernel {
         return ok('pipe');
       case 'file': {
         const stat = this.#options.files.fstat(value.file.fd);
-        return stat.ok ? ok(fdKindOfMode(stat.value.mode)) : err(native(stat.error.code));
+        return stat.ok ? ok(fdKindOfStat(stat.value)) : err(native(stat.error.code));
       }
       case 'inotify':
       case 'process':

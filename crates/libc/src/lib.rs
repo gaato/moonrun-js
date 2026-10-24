@@ -61,6 +61,8 @@ const _: () = assert!(
 
 #[link(wasm_import_module = "libc")]
 unsafe extern "C" {
+    /// Only reached by stat's console classifier, absent from stat_pack's call tree.
+    pub fn isatty(fd: c_int) -> c_int;
     /// Only for `Env`'s ambient backing, which components never construct.
     pub fn setenv(name: *const c_char, value: *const c_char, overwrite: c_int) -> c_int;
     pub fn unsetenv(name: *const c_char) -> c_int;

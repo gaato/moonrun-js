@@ -9,7 +9,14 @@ export type FdKind =
   | 'socket'
   | 'pipe'
   | 'block-device'
-  | 'char-device';
+  | 'char-device'
+  | 'console';
+
+/** Generic stat and the new stdio query distinguish a console from other devices. */
+export function fdKindOfStat(stat: FileStat): FdKind {
+  const kind = fdKindOfMode(stat.mode);
+  return kind === 'char-device' && stat.isTerminal === true ? 'console' : kind;
+}
 
 /** `st_mode & S_IFMT` → file type. */
 export function fdKindOfMode(mode: bigint): FdKind {
@@ -52,6 +59,8 @@ export function fileKindCode(kind: FdKind): number {
       return 6;
     case 'char-device':
       return 7;
+    case 'console':
+      return 8;
   }
 }
 
@@ -282,7 +291,7 @@ export function statValues(stat: FileStat, mask: number): StatValues {
   const values: {
     -readonly [K in keyof StatValues]: StatValues[K];
   } = {};
-  if (mask & STAT_FILE_KIND) values.kind = fdKindOfMode(stat.mode);
+  if (mask & STAT_FILE_KIND) values.kind = fdKindOfStat(stat);
   if (mask & STAT_FILE_SIZE) values.size = BigInt.asIntN(64, stat.size);
   if (mask & STAT_DEVICE_ID) values.deviceId = stat.dev;
   if (mask & STAT_FILE_ID) values.fileId = stat.ino;

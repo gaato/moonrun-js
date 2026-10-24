@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@1af328fbbacb977b813a5c7b193a63b065b6f49e crates/moonrun/src/policy/mod.rs (rewrites: std-os ×2, std-fs ×20)
+// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/policy/mod.rs (rewrites: std-os ×2, std-fs ×20)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -286,10 +286,9 @@ mod tests {
         let temporary_source = temporary_source_dir.path().join("stdin.mbtx");
         crate::os::fs::write(
             &temporary_source,
-            r#"// policy:
-//   fs:
-//     read:
-//       - allowed
+            r#"---
+permission(fs: { "read": ["allowed"] })
+---
 
 fn main {}
 "#,

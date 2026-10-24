@@ -18,17 +18,17 @@ import { TerminationCell } from '../../src/kernel/termination.ts';
 import { ok } from '../../src/ports/result.ts';
 import { FakeScheduler, memoryStdio } from './kernel-fakes.ts';
 
-function setup() {
+function setup(kind: 'char-device' | 'console' = 'char-device', bindMemory = true) {
   const kernel = new AsyncKernel({
     stdio: memoryStdio(),
     scheduler: new FakeScheduler(),
-    stdioKind: () => ok('char-device'),
+    stdioKind: () => ok(kind),
     files: nodeFiles(),
     net: unsupportedNet,
     dns: unsupportedDns,
   });
   const memory = new GuestMemory();
-  memory.bind(new WebAssembly.Memory({ initial: 1 }));
+  if (bindMemory) memory.bind(new WebAssembly.Memory({ initial: 1 }));
   const ctx = {
     host: {
       platform: { currentExe: '/a/b.wasm', pid: 42 },
@@ -52,6 +52,30 @@ function setup() {
 }
 
 describe('moonbitlang/async handler map', () => {
+  it('distinguishes console stdio while preserving the legacy descriptor kind', () => {
+    const { call } = setup('console', false);
+    const fd = call('stdio/get_stdio_handle', 1);
+    expect(call('stdio/kind_of_fd', fd)).toBe(8);
+    expect(call('fd_util/kind_of_fd', fd)).toBe(7);
+  });
+
+  it('exposes console jobs on Linux with the upstream ENOSYS result', async () => {
+    const { call, memory } = setup();
+    const fd = call('stdio/get_stdio_handle', 0);
+    expect(call('stdio/kind_of_fd', fd)).toBe(7);
+    const read = call('thread_pool/make_read_console_job', fd, 4);
+    await call('thread_pool/run_job', read);
+    expect(call('thread_pool/job_get_err', read)).toBe(38);
+    memory.view(0, 8).fill(0x42);
+    call('thread_pool/get_read_console_result', read, 0, 0, 4);
+    expect([...memory.view(0, 8)]).toEqual(Array(8).fill(0x42));
+    call('thread_pool/free_job', read);
+    const write = call('thread_pool/make_write_console_job', fd, 0, 0, 4);
+    await call('thread_pool/run_job', write);
+    expect(call('thread_pool/job_get_err', write)).toBe(38);
+    call('thread_pool/free_job', write);
+  });
+
   it('has disjoint groups covering exactly the implemented symbols', () => {
     const { env } = setup();
     const seen = new Set<string>();

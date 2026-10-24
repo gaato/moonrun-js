@@ -22,9 +22,11 @@ publish = false
 anyhow = "1.0.86"
 clap = { version = "4.5.4", features = ["derive", "string", "env"] }
 indexmap = { version = "2", features = ["serde"] }
+logos = "0.15.1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.97", features = ["preserve_order"] }
+serde_json_lenient = { version = "0.2.1", features = ["preserve_order"] }
 serde_yaml = "0.9.33"
 thiserror = "2"
 toml = { version = "0.9.5", default-features = false, features = ["parse", "serde", "std"] }

@@ -194,8 +194,12 @@ const TOML_CASES = [
   '',
 ];
 
-/** `.mbtx` front matter is YAML (serde_yaml): anchors, tags, block scalars, error positions. */
+/** Legacy YAML remains supported; compare its diagnostics as well as the new permission grammar. */
 const MBTX_CASES = [
+  '----\npermission(fs: { "read": ["allowed"] })\n----\nfn main {}\n',
+  '----\npermission(fs: { "read": "allowed" })\n----\nfn main {}\n',
+  '----\npermission(unknown: true)\n----\nfn main {}\n',
+  '----\npermission(fs: { "read": ["allowed"] }\n----\nfn main {}\n',
   '// policy:\n//   fs: { read: ["allowed"] }\nfn main {}\n',
   '// policy:\n//   env: [\nfn main {}\n',
   'fn main {}\n',

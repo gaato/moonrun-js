@@ -286,7 +286,17 @@ describe('environment provisioning and inheritance', () => {
     expect(json.env.from_host).toEqual(['*']);
   });
 
-  it('reads .mbtx front matter (full YAML)', () => {
+  it('reads permissions from the package-grammar script header', () => {
+    const { policy, stderr } = load(
+      '----\nimport { "moonbitlang/core/env" }\npermission(fs: { "read": ["read"] }, process: { "spawn": true })\n----\nfn main {}\n',
+      'script.mbtx',
+    );
+    expect(policy.checkJob(open(at('read/a.txt'), 0))).toBeUndefined();
+    expect(policy.checkSpawn('anything', ['anything'])).toBeUndefined();
+    expect(stderr()).toBe('');
+  });
+
+  it('reads legacy .mbtx permissions (full YAML)', () => {
     const { policy, stderr } = load(
       '// policy:\n//   fs: &roots\n//     read: [read]\n//   process: { spawn: true }\nfn main {}\n',
       'script.mbtx',

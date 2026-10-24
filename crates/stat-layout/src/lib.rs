@@ -4,6 +4,16 @@
 
 pub(crate) use ::os;
 
+// stat_pack does not query the OS; the upstream stdio helper still names
+// this error constructor even though dead-code elimination removes it.
+mod async_sys {
+    pub(crate) mod os_error {
+        pub(crate) mod stub {
+            pub(crate) fn get_enotsup() -> i32 { 95 }
+        }
+    }
+}
+
 /// The two items stat.rs names from async_host/mod.rs (OS-bound).
 mod async_host {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

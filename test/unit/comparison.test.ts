@@ -15,6 +15,17 @@ const a = '{"type":"result","file":"signal_test.mbt","index":0,"message":""}';
 const b = '{"type":"result","file":"signal_test.mbt","index":1,"message":""}';
 
 describe('suite comparisons', () => {
+  it('orders only upstream helper build summaries, retaining names and counts', () => {
+    const artifact = (name: string) =>
+      `Artifacts:\n  moonbitlang/async_test_programs/${name}  native  <root>/_build/test_programs/native/debug/build/moonbitlang/async_test_programs/${name}/${name}.exe\n`;
+    const a = artifact('cat');
+    const b = artifact('filter');
+    expect(unorderedResults(a + b)).toBe(unorderedResults(b + a));
+    expect(unorderedResults(a + a)).not.toBe(unorderedResults(a));
+    expect(unorderedResults(a + b)).not.toBe(unorderedResults(a + artifact('sleep')));
+    expect(unorderedResults('hello\nworld\n')).not.toBe(unorderedResults('world\nhello\n'));
+  });
+
   it('sorts records within protocol blocks, preserving multiplicity and other output', () => {
     expect(unorderedResults(block([a, b]))).toBe(unorderedResults(block([b, a])));
     expect(unorderedResults(block([a]) + block([b]))).toBe(unorderedResults(block([b, a])));

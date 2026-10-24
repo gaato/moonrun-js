@@ -1,6 +1,6 @@
 import { AsyncKernel, type AsyncKernelOptions, type FdKind } from '../../kernel/async-kernel.ts';
 import { type AsyncError, native } from '../../kernel/errors.ts';
-import { fdKindOfMode } from '../../kernel/file.ts';
+import { fdKindOfStat } from '../../kernel/file.ts';
 import type { ProcessOptions } from '../../kernel/processes.ts';
 import type { StdioStream } from '../../kernel/resource.ts';
 import { GlobalScheduler } from '../../kernel/scheduler.ts';
@@ -48,7 +48,7 @@ export function createAsyncKernel(host: Host, policy: PolicySeams = {}): AsyncKe
     dns: host.dns,
     stdioKind: (stream: StdioStream): Result<FdKind, AsyncError> => {
       const stat = host.files.fstat(stream as HostFd);
-      return stat.ok ? ok(fdKindOfMode(stat.value.mode)) : err(native(stat.error.code));
+      return stat.ok ? ok(fdKindOfStat(stat.value)) : err(native(stat.error.code));
     },
   });
 }

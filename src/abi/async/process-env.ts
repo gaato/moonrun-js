@@ -1,7 +1,8 @@
+import { fileKindCode } from '../../kernel/file.ts';
 import { TerminationSignal } from '../../kernel/termination.ts';
 import { ok } from '../../ports/result.ts';
 import { requestExit } from '../legacy/sys.ts';
-import { type AsyncEnv, fail, status, unwrap } from './env.ts';
+import { type AsyncEnv, fail, handle, status, unwrap } from './env.ts';
 import { readI32Array } from './guest-data.ts';
 import type { HandlerGroup } from './types.ts';
 
@@ -15,6 +16,11 @@ const SIGNALS_BY_INDEX: readonly number[] = [2, 15, 1, -1];
 export function processEnv(env: AsyncEnv) {
   const { ctx, kernel, memory } = env;
   return {
+    'stdio/kind_of_fd': (fd) =>
+      status(env, () => {
+        const kind = kernel.kindOfFd(handle(fd));
+        return kind.ok ? ok(fileKindCode(kind.value)) : kind;
+      }),
     'stdio/get_stdio_handle': (id) => {
       const found = kernel.stdHandle(id);
       if (found.ok) {

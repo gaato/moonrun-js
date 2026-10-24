@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@1af328fbbacb977b813a5c7b193a63b065b6f49e crates/moonutil/src/demangle.rs (rewrites: none)
+// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonutil/src/demangle.rs (rewrites: none)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //

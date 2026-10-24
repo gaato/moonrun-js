@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@1af328fbbacb977b813a5c7b193a63b065b6f49e crates/moonrun/src/runtime/environment.rs (rewrites: std-os ×1, std-env ×4)
+// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/runtime/environment.rs (rewrites: std-os ×1, std-env ×4)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //

@@ -35,25 +35,27 @@ export function parseStackLine(line: string, module?: WebAssembly.Module): Diagn
     const split = inner.lastIndexOf(' (');
     if (split >= 0) {
       const fn = inner.slice(0, split);
-      const location = inner.slice(split + 2).trimEnd();
+      const rawLocation = inner.slice(split + 2).trimEnd();
+      // Deno also reports index 0 for named frames. The new upstream renderer
+      // prints their runtime location, so recover the index before either path.
+      const offset = Number.parseInt(rawLocation.slice(rawLocation.lastIndexOf(':0x') + 3), 16);
+      const index =
+        module === undefined || !rawLocation.startsWith('wasm://')
+          ? undefined
+          : functionBodies.get(module)?.find((body) => offset >= body.start && offset < body.end)
+              ?.index;
+      const location =
+        index === undefined
+          ? rawLocation
+          : rawLocation.replace(/wasm-function\[\d+\]/, `wasm-function[${index}]`);
       // Deno labels unnamed wasm functions; moonrun/V8 prints the bare location.
       if (fn === '<anonymous>' && location.startsWith('wasm://')) {
-        const offset = Number.parseInt(location.slice(location.lastIndexOf(':0x') + 3), 16);
-        const index =
-          module === undefined
-            ? undefined
-            : functionBodies.get(module)?.find((body) => offset >= body.start && offset < body.end)
-                ?.index;
-        const absolute =
-          index === undefined
-            ? location
-            : location.replace(/wasm-function\[\d+\]/, `wasm-function[${index}]`);
-        return { kind: 'frame', indentation, fn: absolute, moduleOffset: undefined };
+        return { kind: 'frame', indentation, fn: location, moduleOffset: undefined };
       }
       const at = location.lastIndexOf(':0x');
       const hex = at >= 0 ? location.slice(at + 3) : '';
       const moduleOffset = hex.length > 0 && HEX.test(hex) ? Number.parseInt(hex, 16) : undefined;
-      return { kind: 'frame', indentation, fn, moduleOffset };
+      return { kind: 'frame', indentation, fn, moduleOffset, runtimeLocation: location };
     }
   }
   const fn = frame.trimEnd();

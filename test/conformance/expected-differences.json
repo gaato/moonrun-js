@@ -1,5 +1,17 @@
 {
-  "node": [],
+  "node": [
+    {
+      "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "170ebe6d2e657999f907551ff0ce27ab77b8d2bd9de882561e6389ba39cf0f64"
+      }
+    }
+  ],
   "deno": [
     {
       "suite": "async",
@@ -55,6 +67,17 @@
       },
       "fingerprints": {
         "wasm": "786e1a172957b62bac447ecf496c985158f535944b57982516a4c6e3ef7ce6a4"
+      }
+    },
+    {
+      "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "170ebe6d2e657999f907551ff0ce27ab77b8d2bd9de882561e6389ba39cf0f64"
       }
     }
   ],
@@ -133,11 +156,11 @@
         "char_test.mbt": [6],
         "clamped_view_test.mbt": [36, 37, 38, 39],
         "double_test.mbt": [4, 6, 7, 8],
-        "exact_view_test.mbt": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15],
+        "exact_view_test.mbt": [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14],
         "fixedarray_block_test.mbt": [0],
         "fixedarray_test.mbt": [40],
         "int64_additional_test.mbt": [3],
-        "int64_test.mbt": [1016, 1017, 1018, 1019],
+        "int64_test.mbt": [1015, 1016, 1017, 1018],
         "mutarrayview_test.mbt": [5, 6, 7, 8, 9, 10, 11, 12, 17, 18, 19, 20],
         "output_test.mbt": [1],
         "panic_nonjs_test.mbt": [0],
@@ -146,7 +169,7 @@
           25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37
         ],
         "result_test.mbt": [5, 6],
-        "string_char_length_test.mbt": [6, 7, 8, 9, 10, 11, 12, 13, 14],
+        "string_char_length_test.mbt": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
         "string_test.mbt": [1, 6, 9, 19, 20, 21, 24, 28],
         "stringbuilder_test.mbt": [6],
         "stringview_test.mbt": [9, 10, 11, 12, 13, 14, 15, 18, 19],
@@ -154,8 +177,8 @@
         "uint_test.mbt": [1]
       },
       "fingerprints": {
-        "wasm": "6f85abdf777a778dfcf37f88ab74340f608ba3b4d818d50352b0ec36521f05ab",
-        "wasm-gc": "7d1ce1b0d30af06ebc39679acab74e59ed8138997afaf2ebfec1df3bdce9425e"
+        "wasm": "f33ea59596f3ae217a8d84c8465adb633ed60a974510e1382965d14d2fda7d14",
+        "wasm-gc": "5f87ce3d60cc093426e0b4141e21c663c017a6db19e7d5af7d9ee27bc85a19f9"
       }
     },
     {
@@ -194,12 +217,12 @@
       "invocation": "bytes/bytes.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "bytes_test.mbt": [19, 20, 25, 26],
+        "bytes_test.mbt": [17, 18, 23, 24],
         "view_test.mbt": [3, 4, 5, 6, 7, 8, 11, 12, 18, 23]
       },
       "fingerprints": {
-        "wasm": "00c25ad4efbc0b6b56ca962e69e0e6a8b60675ccc846015ee2a377b4d6e994a0",
-        "wasm-gc": "00c25ad4efbc0b6b56ca962e69e0e6a8b60675ccc846015ee2a377b4d6e994a0"
+        "wasm": "3a792b6a3769f095aeae29d0b9150d5ae8f86270b5e5ac6bc382e1fc18703115",
+        "wasm-gc": "3a792b6a3769f095aeae29d0b9150d5ae8f86270b5e5ac6bc382e1fc18703115"
       }
     },
     {
@@ -368,18 +391,6 @@
       "fingerprints": {
         "wasm": "87c7feb6fe528ad1cf981a5af727a3653b4c37c4794378907f29fe756231641c",
         "wasm-gc": "87c7feb6fe528ad1cf981a5af727a3653b4c37c4794378907f29fe756231641c"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "internal/regex_engine/automata/automata.whitebox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "symbol_set_wbtest.mbt": [2]
-      },
-      "fingerprints": {
-        "wasm": "008586533308c3949055c15756b551dfd29c8034d3f0fcc57fc1f6a436a7ff0f",
-        "wasm-gc": "008586533308c3949055c15756b551dfd29c8034d3f0fcc57fc1f6a436a7ff0f"
       }
     },
     {
@@ -565,18 +576,6 @@
     },
     {
       "suite": "core",
-      "invocation": "string/internal/regex_engine/regex_engine.whitebox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "state_id_wbtest.mbt": [1]
-      },
-      "fingerprints": {
-        "wasm": "ec14d26bc496d7935d0e9507544a37f0aa5417a71dc360af7c227923bba21589",
-        "wasm-gc": "ec14d26bc496d7935d0e9507544a37f0aa5417a71dc360af7c227923bba21589"
-      }
-    },
-    {
-      "suite": "core",
       "invocation": "string/internal/regex_engine/symbol_map/symbol_map.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
@@ -595,13 +594,24 @@
         "regex_test.mbt": [10, 11, 12, 13],
         "string_test.mbt": [37],
         "view_test.mbt": [
-          13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 34, 35, 36, 37, 38, 39,
-          56, 59, 60, 61, 62, 63, 65, 66, 68, 69, 70, 71, 72, 74, 75, 79, 83, 84, 86, 87
+          11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 31, 32, 33, 34, 35, 36, 53,
+          56, 57, 58, 59, 60, 62, 63, 65, 66, 67, 68, 69, 71, 72, 76, 80, 81, 83, 84
         ]
       },
       "fingerprints": {
-        "wasm": "a3f845d14908f584fd40d199168addab7af8a15f9642e6d81e14172fb0424b73",
-        "wasm-gc": "a3f845d14908f584fd40d199168addab7af8a15f9642e6d81e14172fb0424b73"
+        "wasm": "953bdf614e4c989bf81dc5364c65f673b9ff8fd0473ecba34c481e366360b61b",
+        "wasm-gc": "953bdf614e4c989bf81dc5364c65f673b9ff8fd0473ecba34c481e366360b61b"
+      }
+    },
+    {
+      "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "170ebe6d2e657999f907551ff0ce27ab77b8d2bd9de882561e6389ba39cf0f64"
       }
     }
   ]

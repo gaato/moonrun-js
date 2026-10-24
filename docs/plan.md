@@ -14,7 +14,7 @@ MoonBit の `moonrun`（toolchain 同梱の wasm ランナー、Rust + V8）を 
 
 ## 確定する設計判断（後戻りしにくいもの）
 
-1. **互換の基準は installed moonrun `0.1.20261016 (1af328f)`**。参照 clone を main の最新にした後も、生成・参照は `git show 1af328f:crates/moonrun/...` で基準 commit から行い、`upstream/moon`・`upstream/async`（shallow submodule、gitlink が pin）で commit を固定し、読み出しは `scripts/upstream.ts` に集約。
+1. **互換の基準は installed moonrun `0.1.20261023 (3778465)`**。生成・参照は `upstream/moon`・`upstream/async`（shallow submodule、gitlink が pin）で commit を固定し、読み出しは `scripts/upstream.ts` に集約する。main の更新と互換対象を区別し、同じソース・バイナリで比較するため。
 2. **常に Linux として振る舞う**: `get_platform`=Linux、`is_windows`=0。errno / strerror / `EAI_*` / sockaddr / stat 構造体は固定の Linux テーブル（`os.constants` は使わない）。`*/windows`・macOS 専用の "fake" import は呼ばれたら throw するスタブ。
 3. **JSPI 必須**。Asyncify・Worker+Atomics の代替経路は作らない（ポート interface は `T | Promise<T>` にしておき将来の余地だけ残す）。対象は Node ≥ 24、Deno、Bun、現行ブラウザ。Node 22 は切る。
 4. **仮想カーネルは JS が持つ**: WASI も `node:wasi` を使わず自前、ハンドル・poller・スレッドプール・パイプは TS の状態機械。
@@ -25,7 +25,7 @@ MoonBit の `moonrun`（toolchain 同梱の wasm ランナー、Rust + V8）を 
 ## アーキテクチャ
 
 ```
-CLI (hosts/node/cli.ts)    `--version` は `moonrun-js <版> (compat moonrun 0.1.20261016 1af328f)` 形式。argv（moon の実際の呼び方: [--test-args J] [--policy P [--policy-source-dir D]] <wasm> -- args）、--stack-size 時の再 exec、シグナル、exit
+CLI (hosts/node/cli.ts)    `--version` は `moonrun-js <版> (compat moonrun 0.1.20261023 3778465)` 形式。argv（moon の実際の呼び方: [--test-args J] [--policy P [--policy-source-dir D]] <wasm> -- args）、--stack-size 時の再 exec、シグナル、exit
 Engine / Run (engine/)     bytes|Module の読込、import 構築、JSPI 包み、テストドライバ、終了セル、結果分類、診断
 ABI 層 (abi/)              ゲストから見える数値・文字列をすべてここで決める: ptr/len/BigInt ハンドル、-1+errno、番兵、Linux 構造体、moonrun と同一のエラーテキスト
 Kernel + Domains           kernel: HandleTable, Resource, Poller, ThreadPool/Job/Worker, CompletionSource, Pipe, Signals, Termination
@@ -226,7 +226,7 @@ mise（node 24/26, deno, bun, pnpm, rust + wasm32-unknown-unknown, wasm-tools, b
 
 ## 主要参照ファイル
 
-- `$MR/src/async_api/registry.rs`（生成元。1af328f で読む）
+- `$MR/src/async_api/registry.rs`（生成元。固定した gitlink で読む）
 - `$MR/src/async_host/mod.rs`（poller・worker・completion・TLS ホスト）、`$MR/CONTEXT.md`、`$MR/docs/adr/0001..0011`
 - `$MR/src/v8/mod.rs`、`$MR/src/engine.rs`（実行フロー・エラー分類・テストドライバ）
 - `$MR/src/v8/host_imports.rs`、`$MR/src/template/js_glue.js`（legacy 面）、`$MR/src/v8/wasi.rs`、`$MR/src/wasi/mod.rs`

@@ -150,7 +150,7 @@ function parseSqliteRegistry(source: string): Entry[] {
     results.set(m[1] ?? '', m[2] ?? '');
   }
   const re =
-    /registry\.func_wrap\(\s*MOONBIT_SQLITE_MODULE,\s*"(\w+)",\s*\|\s*(?:_?caller): Caller<'_, Runtime>([^|]*)\|/g;
+    /registry\.func_wrap\(\s*MOONBIT_SQLITE_MODULE,\s*"(\w+)",\s*\|\s*(?:_?caller): Caller<[^>]+>([^|]*)\|/g;
   const entries: Entry[] = [];
   for (const m of source.matchAll(re)) {
     const [, symbol = '', rest = ''] = m;
@@ -169,6 +169,10 @@ function parseSqliteRegistry(source: string): Entry[] {
       );
     }
     entries.push({ kind: 'sqlite', callback: symbol, params, result, symbol });
+  }
+  const registrations = [...source.matchAll(/registry\.func_wrap\(/g)].length;
+  if (entries.length === 0 || entries.length !== registrations) {
+    throw new Error(`parsed ${entries.length} of ${registrations} sqlite registrations`);
   }
   return entries;
 }

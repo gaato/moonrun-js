@@ -67,8 +67,18 @@ export function startJob(job: Job, env: JobEnvironment, done: () => void): Execu
     case 'sleep':
       return sleep(job, payload.ms, env.scheduler, done);
     case 'stream-read':
+      if (payload.console === true) {
+        job.fail(native('ENOSYS'));
+        done();
+        return FINISHED;
+      }
       return streamRead(job, payload, env, done);
     case 'stream-write':
+      if (payload.console === true) {
+        job.fail(native('ENOSYS'));
+        done();
+        return FINISHED;
+      }
       return streamWrite(job, payload, env, done);
     case 'bind':
     case 'getaddrinfo':

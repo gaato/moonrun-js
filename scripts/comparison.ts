@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 /** D12: sort result records inside each protocol block as well as the blocks. */
 export function unorderedResults(stdout: string): string {
   const records: string[] = [];
-  const rest = stdout.replace(
+  let rest = stdout.replace(
     /----- BEGIN MOON TEST RESULT -----\n([\s\S]*?)\n----- END MOON TEST RESULT -----\n/g,
     (block, body: string) => {
       const lines = body.split('\n');
@@ -28,7 +28,17 @@ export function unorderedResults(stdout: string): string {
       return '';
     },
   );
-  return `${rest}\0${records.sort().join('\n')}`;
+  // Concurrent upstream helper builds print these complete summaries in
+  // completion order. Preserve their exact paths and multiplicity, like results.
+  const artifacts: string[] = [];
+  rest = rest.replace(
+    /^Artifacts:\n {2}moonbitlang\/async_test_programs\/[^\s]+ {2}native {2}<root>\/_build\/test_programs\/native\/debug\/build\/moonbitlang\/async_test_programs\/[^\n]+\n/gm,
+    (block) => {
+      artifacts.push(block);
+      return '';
+    },
+  );
+  return `${rest}\0${records.sort().join('\n')}\0${artifacts.sort().join('')}`;
 }
 
 /** D3: unavailable JSC frame names/locations; applies to stderr only. */

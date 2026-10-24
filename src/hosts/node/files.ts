@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { isatty } from 'node:tty';
 import type {
   AccessMode,
   AsyncFilePort,
@@ -32,8 +33,9 @@ function kindOf(entry: fs.Dirent<string | Buffer> | fs.BigIntStats): FileKind {
         : 'other';
 }
 
-function toStat(s: fs.BigIntStats): FileStat {
+function toStat(s: fs.BigIntStats, fd?: HostFd): FileStat {
   return {
+    isTerminal: fd !== undefined && isatty(fd),
     kind: kindOf(s),
     dev: s.dev,
     ino: s.ino,
@@ -111,7 +113,7 @@ export function nodeFiles(cwd: string = process.cwd()): FilePort {
       ),
     fsync: (fd) => attempt(() => fs.fsyncSync(fd)),
     truncate: (fd, size) => attempt(() => fs.ftruncateSync(fd, Number(size))),
-    fstat: (fd) => attempt(() => toStat(fs.fstatSync(fd, { bigint: true }))),
+    fstat: (fd) => attempt(() => toStat(fs.fstatSync(fd, { bigint: true }), fd)),
     stat: (p) => attempt(() => toStat(fs.statSync(at(p), { bigint: true }))),
     lstat: (p) => attempt(() => toStat(fs.lstatSync(at(p), { bigint: true }))),
     readDir: (p) => attempt(() => readDir(at(p))),
@@ -263,7 +265,7 @@ function nodeAsyncFiles(at: (p: string) => string): AsyncFilePort {
       settle<void>((cb) => (dataOnly ? fs.fdatasync(fd, cb) : fs.fsync(fd, cb))).then(done),
     fstat: (fd) =>
       settle<fs.BigIntStats>((cb) => fs.fstat(fd, { bigint: true }, cb)).then((r) =>
-        r.ok ? ok(toStat(r.value)) : r,
+        r.ok ? ok(toStat(r.value, fd)) : r,
       ),
     statAt: (dir, p, follow) => {
       if (dir === undefined || p.startsWith('/')) {

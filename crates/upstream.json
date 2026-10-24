@@ -1,6 +1,10 @@
 {
   "$comment": "Upstream moon files compiled into the wasm components (docs/reuse.md). scripts/sync-upstream.ts extracts each `path` at the moon pin (scripts/upstream.ts) into crates/<crate>/upstream/<path>, applies `rewrites` (the only allowed edits) and checks the per-file hit counts, copies `stubs`, scans for OS calls the rewrites cannot reach, and aligns crates/Cargo.lock with moon's Cargo.lock. Counts cover the whole file, test modules included.",
   "rewrites": {
+    "stdio-reexport": {
+      "from": "pub\\(crate\\) use job::\\{Job, stdio_kind\\};",
+      "to": "pub(crate) use job::Job;"
+    },
     "std-os": {
       "from": "\\bstd::os::(unix|fd)::",
       "to": "crate::os::$1::"
@@ -25,6 +29,26 @@
   "files": [
     {
       "crate": "moonutil",
+      "path": "crates/moonutil/src/moon_pkg/mod.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonutil",
+      "path": "crates/moonutil/src/moon_pkg/lexer.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonutil",
+      "path": "crates/moonutil/src/moon_pkg/parser.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonutil",
+      "path": "crates/moonutil/src/moon_pkg/syntax.rs",
+      "rewrites": {}
+    },
+    {
+      "crate": "moonutil",
       "path": "crates/moonutil/src/demangle.rs",
       "rewrites": {}
     },
@@ -32,7 +56,7 @@
       "crate": "moonutil",
       "path": "crates/moonutil/src/front_matter.rs",
       "rewrites": {
-        "std-fs": 4
+        "std-fs": 2
       }
     },
     {
@@ -45,7 +69,9 @@
     {
       "crate": "moonrun-diag",
       "path": "crates/moonrun/src/wasm_diagnostic.rs",
-      "rewrites": {}
+      "rewrites": {
+        "std-fs": 1
+      }
     },
     {
       "crate": "moonrun-diag",
@@ -64,7 +90,7 @@
       "crate": "moonrun-policy",
       "path": "crates/moonrun/src/policy/config.rs",
       "rewrites": {
-        "std-fs": 7
+        "std-fs": 9
       }
     },
     {
@@ -115,6 +141,7 @@
       "crate": "moonrun-policy",
       "path": "crates/moonrun/src/filesystem/mod.rs",
       "rewrites": {
+        "stdio-reexport": 1,
         "std-os": 8,
         "resolved-method": 3,
         "std-fs": 44
@@ -138,8 +165,8 @@
       "crate": "stat-layout",
       "path": "crates/moonrun/src/filesystem/job/stat.rs",
       "rewrites": {
-        "std-os": 6,
-        "std-fs": 3
+        "std-os": 7,
+        "std-fs": 4
       }
     }
   ],

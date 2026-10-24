@@ -40,7 +40,10 @@ export function fdUtil(env: AsyncEnv) {
     'fd_util/kind_of_fd': (fd) =>
       status(env, () => {
         const kind = kernel.kindOfFd(handle(fd));
-        return kind.ok ? ok(fileKindCode(kind.value)) : kind;
+        // This legacy import predates FileKind::Console; it keeps code 7.
+        return kind.ok
+          ? ok(fileKindCode(kind.value === 'console' ? 'char-device' : kind.value))
+          : kind;
       }),
     'fd_util/set_cloexec': (fd) => zeroOrMinusOne(env, () => kernel.setCloexec(handle(fd))),
     // ADR 0010: a compat import must not change the blocking mode of (possibly stdio) fds.

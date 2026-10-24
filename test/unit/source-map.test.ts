@@ -148,6 +148,22 @@ describe('loadSourceMap', () => {
 });
 
 describe('render', () => {
+  it('retains the runtime location after the mapped source position', () => {
+    const { d, map } = parse('{"sources":["main.mbt"],"mappings":"AAAA"}');
+    const location = 'wasm://wasm/abcd:wasm-function[42]:0x1234';
+    const lines = [
+      {
+        kind: 'frame',
+        indentation: '    ',
+        fn: '_M0FP13pkg3foo',
+        moduleOffset: 0x1234,
+        runtimeLocation: location,
+      },
+    ] as const;
+    expect(d.render(lines, map, false)).toBe(`    at @pkg.foo main.mbt:1 (${location})`);
+    expect(d.render(lines, undefined, false)).toBe(`    at @pkg.foo (${location})`);
+  });
+
   it('renders text and demangled frames, and hides frames without stack traces', () => {
     const d = memoryDiagnostics(new Map());
     const lines = [

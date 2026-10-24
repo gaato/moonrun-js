@@ -105,6 +105,7 @@ export type JobPayload =
   /** `make_read_job` on stdio, a pipe or a file; `position < 0` reads at the current offset. */
   | {
       readonly kind: 'stream-read';
+      readonly console?: boolean;
       readonly resource: Resource;
       readonly len: number;
       readonly position: bigint;
@@ -113,6 +114,7 @@ export type JobPayload =
   /** `make_write_job` on stdio, a pipe or a file. */
   | {
       readonly kind: 'stream-write';
+      readonly console?: boolean;
       readonly resource: Resource;
       readonly data: Uint8Array;
       readonly position: bigint;

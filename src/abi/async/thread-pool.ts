@@ -67,6 +67,54 @@ export function threadPool(env: AsyncEnv) {
         return ok(ids.length * 4);
       }),
     'thread_pool/make_sleep_job': (durationMs) => pool.insertJob({ kind: 'sleep', ms: durationMs }),
+    // Console jobs use UTF-16 units. Like upstream on Unix, running them
+    // returns ENOSYS; construction still validates lengths and owns the fd.
+    'thread_pool/make_read_console_job': (fd, len) => {
+      const bytes = checkedAdd(len, len);
+      return unwrap(
+        kernel.insertResourceJob(handle(fd), (resource) => ({
+          kind: 'stream-read',
+          resource,
+          len: bytes,
+          position: -1n,
+          result: undefined,
+          console: true,
+        })),
+      );
+    },
+    'thread_pool/make_write_console_job': (fd, ptr, offset, len) => {
+      unwrap(kernel.resources.get(handle(fd)));
+      const data = memory.copyOut(
+        checkedAdd(ptr, checkedAdd(offset, offset)),
+        checkedAdd(len, len),
+      );
+      return unwrap(
+        kernel.insertResourceJob(handle(fd), (resource) => ({
+          kind: 'stream-write',
+          resource,
+          data,
+          position: -1n,
+          console: true,
+        })),
+      );
+    },
+    'thread_pool/get_read_console_result': (job, dst, offset, len) => {
+      const found = unwrap(pool.job(handle(job)));
+      const payload = found.payload;
+      if (!isFilesystem(payload)) throw new AsyncFailure(BADF);
+      if (found.err !== undefined) return;
+      if (
+        payload.kind !== 'stream-read' ||
+        payload.console !== true ||
+        payload.result === undefined
+      ) {
+        throw new AsyncFailure(BADF);
+      }
+      const target = checkedAdd(dst, checkedAdd(offset, offset));
+      const bytes = checkedAdd(len, len);
+      if (payload.result.length > bytes) throw new AsyncFailure(FAULT);
+      memory.view(target, bytes).set(payload.result);
+    },
     'thread_pool/make_read_job': (fd, len, position) =>
       unwrap(
         kernel.insertResourceJob(handle(fd), (resource) => ({

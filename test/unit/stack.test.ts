@@ -4,6 +4,17 @@ import { guestFrame } from '../../src/diagnostics/stack.ts';
 import { exceptionLines, parseStackLine, rememberFunctionBodies } from '../../src/engine/stack.ts';
 
 describe('runtime stacks', () => {
+  it('keeps a named Wasm frame location for diagnostic rendering', () => {
+    const location = 'wasm://wasm/abcd:wasm-function[42]:0x1234';
+    expect(parseStackLine(`    at f (${location})`)).toEqual({
+      kind: 'frame',
+      indentation: '    ',
+      fn: 'f',
+      moduleOffset: 0x1234,
+      runtimeLocation: location,
+    });
+  });
+
   it('keeps Node anonymous locations and normalizes Deno labels', () => {
     const location = 'wasm://wasm/abcd:wasm-function[0]:0x23';
     expect(parseStackLine(`    at <anonymous> (${location})`)).toEqual(
@@ -32,6 +43,11 @@ describe('runtime stacks', () => {
     const deno = location.replace(/wasm-function\[\d+\]/, 'wasm-function[0]');
     const frame = parseStackLine(`    at <anonymous> (${deno})`, module);
     expect(frame).toMatchObject({ kind: 'frame', fn: location });
+    expect(parseStackLine(`    at trap (${deno})`, module)).toMatchObject({
+      kind: 'frame',
+      fn: 'trap',
+      runtimeLocation: location,
+    });
     expect(location).toContain('wasm-function[2]');
   });
 

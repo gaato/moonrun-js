@@ -125,7 +125,7 @@ pub extern "C" fn diag_source_map_free(id: u32) {
 #[serde(untagged)]
 enum Line {
     Text(String),
-    Frame { indentation: String, function: String, offset: Option<usize> },
+    Frame { indentation: String, function: String, offset: Option<usize>, location: Option<String> },
 }
 
 /// `wasm_diagnostic::render`. `lines` is a JSON array of strings (text lines) and
@@ -140,9 +140,10 @@ pub unsafe extern "C" fn diag_render(lines: *const u8, lines_len: usize, map: u3
     };
     let lines = lines.into_iter().map(|line| match line {
         Line::Text(text) => DiagnosticLine::Text(text),
-        Line::Frame { indentation, function, offset } => DiagnosticLine::Frame {
+        Line::Frame { indentation, function, offset, location } => DiagnosticLine::Frame {
             indentation,
             function,
+            runtime_location: location,
             module_offset: offset,
         },
     });

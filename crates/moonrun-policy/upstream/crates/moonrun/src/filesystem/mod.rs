@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@1af328fbbacb977b813a5c7b193a63b065b6f49e crates/moonrun/src/filesystem/mod.rs (rewrites: std-os ×8, resolved-method ×3, std-fs ×44)
+// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/filesystem/mod.rs (rewrites: stdio-reexport ×1, std-os ×8, resolved-method ×3, std-fs ×44)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -23,9 +23,6 @@
 //! filesystem authorization, OS operations, and the guest-visible error text.
 //! WASI has its own descriptor and preopen capability model and does not pass
 //! through this module.
-
-#[cfg(feature = "v8")]
-pub(crate) mod v8;
 
 mod job;
 

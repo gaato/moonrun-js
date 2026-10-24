@@ -7,7 +7,7 @@ publish.workspace = true
 description = "The part of moon's moonutil crate that moonrun uses (verbatim files under upstream/)"
 
 [features]
-front_matter = ["dep:anyhow", "dep:serde", "dep:serde_yaml", "dep:indexmap", "dep:regex"]
+front_matter = ["dep:anyhow", "dep:serde", "dep:serde_yaml", "dep:indexmap", "dep:regex", "dep:logos", "dep:serde_json_lenient"]
 policy_transport = []
 
 [dependencies]
@@ -17,3 +17,5 @@ serde = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
 indexmap = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+logos = { workspace = true, optional = true }
+serde_json_lenient = { workspace = true, optional = true }

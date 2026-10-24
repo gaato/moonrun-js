@@ -42,9 +42,9 @@ MOONRUN_OVERRIDE=$(command -v moonrun-js) moon test --target wasm
 
 | Runtime | Status |
 |---|---|
-| Node.js ≥ 24 | Matches `moonrun` on the moonbitlang/core and moonbitlang/async test suites |
-| Deno | Matches on core; a few socket and file timestamp cases differ |
-| Bun | Same test results and exit status; stack traces carry no wasm function names |
+| Node.js ≥ 24 | Matches core; cross-process file-lock tests differ because locks are scoped to one Run |
+| Deno | Matches core; cross-process locks, a few socket and file timestamp cases differ |
+| Bun | Core outcomes match, with unnamed wasm stack frames; async has lock/socket differences and an unresolved `Process::wait` timing assertion |
 
 Every known difference is listed in [docs/divergences.md](docs/divergences.md). JSPI
 (`WebAssembly.Suspending`), Wasm GC and exception handling are required.

@@ -12,6 +12,7 @@ export type DiagnosticLine =
       readonly indentation: string;
       readonly fn: string;
       readonly moduleOffset: number | undefined;
+      readonly runtimeLocation?: string;
     };
 
 /** Reads a source map file; `undefined` when it cannot be read. */
@@ -92,7 +93,12 @@ export class Diagnostics {
       lines.map((line) =>
         line.kind === 'text'
           ? line.text
-          : { indentation: line.indentation, function: line.fn, offset: line.moduleOffset ?? null },
+          : {
+              indentation: line.indentation,
+              function: line.fn,
+              offset: line.moduleOffset ?? null,
+              location: line.runtimeLocation ?? null,
+            },
       ),
     );
     const id = map !== undefined && map.owner === this ? map.id : 0;

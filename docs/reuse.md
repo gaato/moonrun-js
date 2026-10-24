@@ -4,6 +4,18 @@
 
 ## 決定
 
+2026-10-24: 流用元を moon `3778465a252d2838357dddf25dc0ebf3ff3ba40f`
+（moonrun `0.1.20261023`）へ更新した。`.mbtx` の `permission` ブロックは
+front matter と同じ文法で読む必要があるため、moonutil の `moon_pkg/`
+lexer・parser・syntax もそのまま流用する。shim の `Import` と backend 型は、
+そのパーサーが必要とする境界だけを提供する。
+
+新しい `stdio_kind` の再 export は `stdio-reexport` 規則で除く。
+OS に依存する関数をポリシー wasm に取り込まないためで、分類の実装は TS が持つ。
+この書き換えも件数を固定して検査する。診断 wasm は本家の `v8` 分岐を使い、
+名前付きフレームに位置がない場合と runtime location を出す場合を両方扱う。
+これらは診断文言を独自に再実装せず、本家と一致させるための変更である。
+
 | 対象（moon 1af328f） | 判定 | 根拠 | 置き換える TS |
 |---|---|---|---|
 | `policy/**`、`runtime/environment*.rs`、moonutil `front_matter.rs` | 流用する | 本家と 164/164 一致（TS は `.mbtx` の 7 件で不一致）。上流の変更が多い | `src/domains/policy/*`、`src/hosts/node/policy-loader.ts` の大半 |

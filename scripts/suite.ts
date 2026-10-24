@@ -26,13 +26,18 @@ import {
   unorderedResults,
   validateExpectedDifferences,
 } from './comparison.ts';
-import { checkoutUpstream } from './upstream.ts';
+import { suiteCacheIdentity } from './suite-cache.ts';
+import { checkoutUpstream, upstreamPin } from './upstream.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const cache = path.join(repoRoot, '.cache');
 const home = process.env['HOME'] ?? '';
 const reference =
   process.env['MOONRUN_REFERENCE'] ?? path.join(home, '.moonup/toolchains/latest/bin/moonrun');
+const toolchainIdentity = suiteCacheIdentity(
+  execFileSync('moon', ['version', '--all'], { encoding: 'utf8' }),
+  execFileSync(reference, ['--version'], { encoding: 'utf8' }),
+);
 
 const argv = process.argv.slice(2);
 const suite = argv[0];
@@ -83,7 +88,13 @@ const expected = (expectations[runtime] ?? []).filter(
 );
 
 function checkout(): string {
-  const dir = path.join(cache, 'upstream', suite ?? '');
+  // The bundled core changes with moonc. A fixed `core/` directory silently
+  // keeps testing the previous toolchain's sources after an upgrade.
+  const dir = path.join(
+    cache,
+    'upstream',
+    suite === 'core' ? `core-${toolchainIdentity}` : (suite ?? ''),
+  );
   if (suite === 'async') {
     return checkoutUpstream('async', dir);
   }
@@ -182,6 +193,12 @@ writeFileSync(
   { mode: 0o755 },
 );
 if (suite === 'async') {
+  // The checkout normally lives inside our type=module package. Upstream's
+  // Node helpers are CommonJS and must keep their standalone-repository scope.
+  const packageJson = path.join(project, 'package.json');
+  if (!existsSync(packageJson)) {
+    writeFileSync(packageJson, '{"private":true,"type":"commonjs"}\n');
+  }
   const programs = path.join(project, 'test_programs');
   for (const entry of readdirSync(programs, { withFileTypes: true })) {
     if (entry.isDirectory() && existsSync(path.join(programs, entry.name, 'moon.pkg'))) {
@@ -201,7 +218,9 @@ const packagePart =
     : packageKey.length <= 80
       ? `-${packageKey}`
       : `-${createHash('sha256').update(packageKey).digest('hex').slice(0, 16)}`;
-const key = `${path.basename(project)}-${target}${packagePart}`;
+const sourceIdentity = suite === 'async' ? upstreamPin('async') : '';
+const recordingIdentity = suiteCacheIdentity(toolchainIdentity, sourceIdentity);
+const key = `${path.basename(project)}-${recordingIdentity}-${target}${packagePart}`;
 const refDir = path.join(cache, 'records', `${key}.ref`);
 const jsDir = path.join(cache, 'records', `${key}.${runtime}`);
 if (refreshRef || !existsSync(refDir)) {

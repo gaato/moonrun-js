@@ -1,0 +1,25 @@
+// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonutil/src/moon_pkg/mod.rs (rewrites: none)
+// moon: The build system and package manager for MoonBit.
+// Copyright (C) 2026 International Digital Economy Academy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// For inquiries, you can contact us via e-mail at jichuruanjian@idea.edu.cn.
+
+mod lexer;
+mod parser;
+mod syntax;
+pub use lexer::*;
+pub use parser::*;
+pub use syntax::*;

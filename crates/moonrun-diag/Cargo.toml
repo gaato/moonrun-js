@@ -9,6 +9,14 @@ description = "moonrun's guest diagnostics (source maps, stack rendering, demang
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+# The upstream renderer must retain V8 locations supplied by our adapters.
+default = ["v8"]
+v8 = []
+# Known upstream renderer feature names; this component selects v8 above.
+wasmtime = []
+wee8 = []
+
 [dependencies]
 os = { path = "../os" }
 moonutil = { path = "../moonutil" }

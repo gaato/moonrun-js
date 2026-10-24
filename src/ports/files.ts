@@ -29,6 +29,8 @@ export interface DirEntry {
 }
 
 export interface FileStat {
+  /** Descriptor metadata can distinguish a terminal from another character device. */
+  readonly isTerminal?: boolean;
   readonly kind: FileKind;
   readonly dev: bigint;
   readonly ino: bigint;
