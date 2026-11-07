@@ -23,6 +23,7 @@ import {
   type ExpectedDifferences,
   jscStderr,
   matchExpectedDifferences,
+  resultRecords,
   unorderedResults,
   validateExpectedDifferences,
 } from './comparison.ts';
@@ -169,6 +170,24 @@ function load(dir: string): Map<string, Record> {
   return map;
 }
 
+/**
+ * The test records that differ, with both results. Under `--unordered` the first
+ * differing raw line is mostly completion order and does not name the failing test.
+ */
+function recordDifferences(reference: string, actual: string): string {
+  const a = resultRecords(reference);
+  const b = resultRecords(actual);
+  const lines: string[] = [];
+  for (const key of [...new Set([...a.keys(), ...b.keys()])].sort()) {
+    if (a.get(key) !== b.get(key)) {
+      lines.push(
+        `${key}:\n  moonrun:    ${a.get(key) ?? '(none)'}\n  moonrun-js: ${b.get(key) ?? '(none)'}`,
+      );
+    }
+  }
+  return lines.join('\n');
+}
+
 function firstDifference(a: string, b: string): string {
   const al = a.split('\n');
   const bl = b.split('\n');
@@ -269,7 +288,13 @@ for (const [k, r] of ref) {
           : firstDifference(String(r[field]), String(j[field]));
       const difference = { argv: r.argv, field, detail };
       mismatches.push(difference);
-      if (field !== 'stdout' || !sameText(r.stdout, accepted.stdout)) unexpected.push(difference);
+      if (field !== 'stdout') {
+        unexpected.push(difference);
+      } else if (!sameText(r.stdout, accepted.stdout)) {
+        // Name the tests that remain after the expected differences were accepted.
+        const records = recordDifferences(r.stdout, accepted.stdout);
+        unexpected.push(records === '' ? difference : { ...difference, detail: records });
+      }
     }
   }
 }
