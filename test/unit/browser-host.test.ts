@@ -226,14 +226,16 @@ describe('browser host under Node Web APIs', () => {
           take(host.files.close(fd));
         }
         const outcome = await host.run(new Uint8Array(compiled.stdout));
-        expect(outcome).toEqual(
-          cached
-            ? { kind: 'completed' }
-            : legacy
-              ? { kind: 'signaled', signal: 6 }
-              : { kind: 'exited', code: 6 },
-        );
-        if (!cached && legacy) expect(stderr).toContain('Failed to read file: /work/mnt/data.txt');
+        if (!cached && legacy) {
+          // moonrun 0.1.20261104: a failed legacy import is a host error, not a panic.
+          expect(outcome.kind).toBe('host-failure');
+          expect(outcome.kind === 'host-failure' && outcome.failure.chain[0]).toMatch(
+            /^Failed to read file: \/work\/mnt\/data\.txt\n/,
+          );
+        } else {
+          expect(outcome).toEqual(cached ? { kind: 'completed' } : { kind: 'exited', code: 6 });
+        }
+        if (!cached && legacy) expect(stderr).toBe('');
       }
     });
   }

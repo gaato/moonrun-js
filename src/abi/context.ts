@@ -23,6 +23,8 @@ export interface RunContext {
    * first use when no policy was loaded (an unchecked Host Filesystem).
    */
   policy(): PolicyComponent;
+  /** The Run's policy when one is enforced; WASI consults it only then (no checks otherwise). */
+  readonly enforcedPolicy: PolicyComponent | undefined;
   /** argv[0]: the wasm path exactly as given. */
   readonly moduleName: string;
   readonly args: readonly string[];

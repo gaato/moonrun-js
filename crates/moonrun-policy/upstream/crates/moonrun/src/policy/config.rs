@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/policy/config.rs (rewrites: std-fs ×9)
+// upstream: moonbitlang/moon@940aa18df6db921386e87e16fa94b84fa267864b crates/moonrun/src/policy/config.rs (rewrites: std-fs ×9)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -17,9 +17,9 @@
 //
 // For inquiries, you can contact us via e-mail at jichuruanjian@idea.edu.cn.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub(super) use crate::runtime::EnvConfig;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
@@ -36,9 +36,16 @@ pub(super) struct PolicyConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct FsConfig {
     #[serde(default)]
-    pub(super) read: Vec<PathBuf>,
+    pub(super) read: Vec<FsRuleConfig>,
     #[serde(default)]
-    pub(super) write: Vec<PathBuf>,
+    pub(super) write: Vec<FsRuleConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub(super) enum FsRuleConfig {
+    Path(PathBuf),
+    Glob { glob: String },
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -54,18 +61,11 @@ pub(super) struct NetConfig {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct EnvConfig {
-    #[serde(default)]
-    pub(super) from_host: Vec<String>,
-    #[serde(default)]
-    pub(super) required_from_host: Vec<String>,
-    #[serde(default)]
-    pub(super) set: BTreeMap<String, String>,
-}
-
-#[derive(Clone, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct ProcessConfig {
+    #[serde(default)]
+    pub(super) virtualize: bool,
+    #[serde(default)]
+    pub(super) ipc: bool,
     #[serde(default)]
     pub(super) spawn: bool,
     #[serde(default)]
@@ -196,9 +196,9 @@ spawn = true
 import { "moonbitlang/core/env" }
 permission(
   env: { "set": { "APP_ENV": "embedded" } },
-  fs: { "read": ["."], "write": ["scratch"] },
+  fs: { "read": [".", { "glob": "logs/**/*.txt" }], "write": ["scratch"] },
   net: { "connect": ["example.com:443"] },
-  process: { "allow": [{ "program": "git", "args_prefix": ["status"] }] },
+  process: { "virtualize": true, "allow": [{ "program": "git", "args_prefix": ["status"] }] },
 )
 ---
 
@@ -214,10 +214,19 @@ fn main {}
             Some("embedded")
         );
         let fs = config.fs.unwrap();
-        assert_eq!(fs.read, [PathBuf::from(".")]);
-        assert_eq!(fs.write, [PathBuf::from("scratch")]);
+        assert_eq!(
+            fs.read,
+            [
+                FsRuleConfig::Path(PathBuf::from(".")),
+                FsRuleConfig::Glob {
+                    glob: "logs/**/*.txt".into()
+                }
+            ]
+        );
+        assert_eq!(fs.write, [FsRuleConfig::Path(PathBuf::from("scratch"))]);
         assert_eq!(config.net.unwrap().connect, ["example.com:443"]);
         let process = config.process.unwrap();
+        assert!(process.virtualize);
         assert!(!process.spawn);
         assert_eq!(process.allow[0].program, "git");
         assert_eq!(process.allow[0].args_prefix, ["status"]);

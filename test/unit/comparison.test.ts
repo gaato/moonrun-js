@@ -83,6 +83,43 @@ const entry = (divergence = 'D33'): ExpectedDifference => ({
 });
 
 describe('expected suite differences', () => {
+  it('accepts a D16 stderr only as interleaved copies of its exact reports, only for D16', () => {
+    const one = 'PanicError\n    at helper (<root>/main.mbt:61)\n';
+    const two = 'PanicError\n    at helper (<root>/main.mbt:61)\n    at other (<root>/x.mbt:1)\n';
+    const lock = { ...entry('D16'), stderrReports: { wasm: [one, two] } };
+    const run = (actualStderr: string, referenceStderr = '') =>
+      matchExpectedDifferences(block([reference]), block([failure]), [lock], 'wasm', {
+        reference: referenceStderr,
+        actual: actualStderr,
+      });
+    expect(run(one)).toMatchObject({ matched: [lock], stderrMatched: true });
+    // Any number of reports, any mix, interleaved even mid-line.
+    expect(run(one + two + one).stderrMatched).toBe(true);
+    expect(run(`${one.slice(0, 15)}${two}${one.slice(15)}`).stderrMatched).toBe(true);
+    // Anything else fails the whole entry: other bytes, a partial report, no stderr.
+    expect(run(`${one}x`).matched).toEqual([]);
+    expect(run(one.slice(1)).matched).toEqual([]);
+    expect(run('').matched).toEqual([]);
+    expect(run(one, 'reference output').matched).toEqual([]);
+    const docs = '| D16 | locks |\n| D33 | TTL |';
+    expect(() => validateExpectedDifferences({ node: [lock] }, docs)).not.toThrow();
+    expect(() =>
+      validateExpectedDifferences({ node: [{ ...entry(), stderrReports: { wasm: [one] } }] }, docs),
+    ).toThrow('Only D16');
+    expect(() =>
+      validateExpectedDifferences(
+        { node: [{ ...lock, stderrReports: { 'wasm-gc': [one] } }] },
+        docs,
+      ),
+    ).toThrow('Invalid stderr reports');
+    expect(() =>
+      validateExpectedDifferences(
+        { node: [{ ...lock, stderrReports: { wasm: [one, one] } }] },
+        docs,
+      ),
+    ).toThrow('Invalid stderr reports');
+  });
+
   it('matches exact test identities and messages, preserving raw unrelated output', () => {
     const expected = entry();
     const accepted = matchExpectedDifferences(

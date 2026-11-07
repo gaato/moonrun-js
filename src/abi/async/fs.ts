@@ -1,4 +1,4 @@
-import { type AsyncError, BADF, FAULT, INVAL } from '../../kernel/errors.ts';
+import { type AsyncError, BADF, FAULT, INVAL, native } from '../../kernel/errors.ts';
 import {
   dirEntry,
   fileTimeRecord,
@@ -82,6 +82,15 @@ export function filesystem(env: AsyncEnv) {
   };
   const parentOf = (parent: bigint): Resource | undefined =>
     handle(parent) === kernel.resources.invalidHandle ? undefined : acquireFile(parent);
+  /** A failed Job for a valid directory `parent` (D48); undefined for the invalid handle. */
+  const relativeUnsupported = (parent: bigint): Handle | undefined => {
+    const held = parentOf(parent);
+    if (held === undefined) {
+      return undefined;
+    }
+    relinquish(held);
+    return failed(native('ENOSYS'));
+  };
   const visible = (job: bigint) => unwrap(pool.job(handle(job)));
   const fsJob = (job: bigint) => {
     const found = visible(job);
@@ -131,6 +140,26 @@ export function filesystem(env: AsyncEnv) {
       open(ptr, len, access, create, append, sync, mode, OPEN_IDENTITY_REQUEST),
     'thread_pool/make_open_stat_job': (ptr, len, access, create, append, sync, mode, mask, cap) =>
       open(ptr, len, access, create, append, sync, mode, statRequest(mask, cap)),
+    // async's pending directory-relative API (moonrun PR 716). No released async calls
+    // it with a directory yet: it still panics on a valid parent. Paths relative to a
+    // held directory are not modelled by the hosts or the policy check, so such a Job
+    // fails with ENOSYS (D48) instead of resolving the path against the cwd.
+    'thread_pool/make_openat_job': (
+      parent,
+      ptr,
+      len,
+      access,
+      create,
+      append,
+      sync,
+      mode,
+      mask,
+      cap,
+    ) =>
+      relativeUnsupported(parent) ??
+      open(ptr, len, access, create, append, sync, mode, statRequest(mask, cap)),
+    'thread_pool/make_removeat_job': (parent, ptr, len) =>
+      relativeUnsupported(parent) ?? insert({ kind: 'remove', path: path(ptr, len) }),
     'thread_pool/open_job_get_fd': (job) => unwrap(kernel.openJobFd(handle(job))),
     'thread_pool/open_job_get_kind': (job) =>
       Number(BigInt.asIntN(32, unwrap(kernel.openJobProperty(handle(job), 'kind')))),

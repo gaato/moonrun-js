@@ -1,4 +1,4 @@
-//! moonrun-cli: upstream's clap definition (`struct Commandline` from main.rs, cut out by
+//! moonrun-cli: upstream's clap definition (`struct MoonrunCli` from cli_support.rs, cut out by
 //! build.rs) behind a C ABI. The program name and version are injected (D5).
 #![allow(dead_code)]
 
@@ -66,7 +66,7 @@ fn hex(bytes: &[u8]) -> String {
 /// ANSI styling of messages for stdout / stderr.
 ///
 /// Returns -1 when parsed (result: JSON `{path_hex, args, no_stack_trace, test_args,
-/// stack_size, policy_hex, policy_source_dir_hex}`), otherwise clap's exit code with the
+/// stack_size, policy_hex, policy_source_dir_hex, daemon, virtual_process}`), otherwise clap's exit code with the
 /// rendered message as result (stdout for code 0, stderr otherwise).
 ///
 /// # Safety
@@ -87,13 +87,13 @@ pub unsafe extern "C" fn cli_parse(
     args.pop();
     let name = String::from_utf8_lossy(unsafe { input(name, name_len) }).into_owned();
     let version = String::from_utf8_lossy(unsafe { input(version, version_len) }).into_owned();
-    let command = Commandline::command()
+    let command = MoonrunCli::command()
         .name(name.clone())
         .bin_name(name)
         .version(version);
     let parsed = command
         .try_get_matches_from(args)
-        .and_then(|mut matches| Commandline::from_arg_matches_mut(&mut matches));
+        .and_then(|mut matches| MoonrunCli::from_arg_matches_mut(&mut matches));
     match parsed {
         Ok(c) => {
             let bytes = |p: &PathBuf| hex(p.as_os_str().as_encoded_bytes());
@@ -105,6 +105,8 @@ pub unsafe extern "C" fn cli_parse(
                 "stack_size": c.stack_size,
                 "policy_hex": c.policy.as_ref().map(bytes),
                 "policy_source_dir_hex": c.policy_source_dir.as_ref().map(bytes),
+                "daemon": c.daemon,
+                "virtual_process": c.virtual_process,
             });
             set_result(out.to_string().into_bytes());
             -1

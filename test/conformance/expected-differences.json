@@ -8,35 +8,29 @@
         "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
       },
       "fingerprints": {
-        "wasm": "170ebe6d2e657999f907551ff0ce27ab77b8d2bd9de882561e6389ba39cf0f64"
+        "wasm": "7744e1f78e1967b1372e9449a029317fe9e2609af31e367ba0812884571bad9b"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "7fd0b026db0f160c32cce22a1838236d7a7e3ec86545d180c89e2052ef485b6e"
+      },
+      "stderrReports": {
+        "wasm": [
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.anon (<root>/async/internal/event_loop/event_loop.mbt:508)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend_check_cancel.anon (<root>/async/internal/event_loop/event_loop.mbt:199)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:62)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    at @moonbitlang/core/async.run_async_main (<root>/async/integration.mbt:22)\n    at moonbit_main (<root>/async/stdio/stdio.mbt:155)\n    ...\n",
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.anon (<root>/async/internal/event_loop/event_loop.mbt:508)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend_check_cancel.anon (<root>/async/internal/event_loop/event_loop.mbt:199)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:60)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    at @moonbitlang/core/async.run_async_main (<root>/async/integration.mbt:22)\n    at moonbit_main (<root>/async/stdio/stdio.mbt:155)\n    ...\n",
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:504)\n    at @moonbitlang/core/async/internal/coroutine.protect_from_cancel[Unit].anon (<root>/async/internal/coroutine/coroutine.mbt:239)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend.anon (<root>/async/internal/event_loop/event_loop.mbt:185)\n    at @moonbitlang/core/async/internal/coroutine.suspend.anon (<root>/async/internal/coroutine/coroutine.mbt:150)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:62)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    ...\n"
+        ]
       }
     }
   ],
   "deno": [
-    {
-      "suite": "async",
-      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
-      "divergence": "D39",
-      "tests": {
-        "timestamp_test.mbt": [0]
-      },
-      "fingerprints": {
-        "wasm": "fbc842bebe3e93ac301bbe17266d6158aff3c98926df4044221428529b66c61a"
-      },
-      "flaky": true
-    },
-    {
-      "suite": "async",
-      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
-      "divergence": "D39",
-      "tests": {
-        "timestamp_test.mbt": [2]
-      },
-      "fingerprints": {
-        "wasm": "4553b9ad7dca6d7d4b524790ef6edd9d0a77df8bae5785b56522f77d4aec2be4"
-      },
-      "flaky": true
-    },
     {
       "suite": "async",
       "invocation": "moonbitlang/async/socket/socket.blackbox_test.wasm",
@@ -78,7 +72,7 @@
         "dual_stack_test.mbt": [1]
       },
       "fingerprints": {
-        "wasm": "786e1a172957b62bac447ecf496c985158f535944b57982516a4c6e3ef7ce6a4"
+        "wasm": "0788f7324a84da46bfbcaa1a9b1a3ab54d63aade7ffe706f3e89b9c6a5bb24cb"
       }
     },
     {
@@ -89,8 +83,118 @@
         "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
       },
       "fingerprints": {
-        "wasm": "170ebe6d2e657999f907551ff0ce27ab77b8d2bd9de882561e6389ba39cf0f64"
+        "wasm": "7744e1f78e1967b1372e9449a029317fe9e2609af31e367ba0812884571bad9b"
       }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/socket/socket.blackbox_test.wasm",
+      "divergence": "D33",
+      "tests": {
+        "multicast_test.mbt": [3]
+      },
+      "fingerprints": {
+        "wasm": "f4e83a01d2f97317b52b792a0e2d83cc3aacb81e480d336fb6c632b0cf52575d"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/socket/socket.blackbox_test.wasm",
+      "divergence": "D34",
+      "tests": {
+        "getsockname_test.mbt": [1]
+      },
+      "fingerprints": {
+        "wasm": "485219c9b7366a01d76d0e40d2273c02a2ffb8f7d96952ff16602d0c7cd0243f"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/socket/socket.blackbox_test.wasm",
+      "divergence": "D35",
+      "tests": {
+        "multicast_test.mbt": [2, 4]
+      },
+      "fingerprints": {
+        "wasm": "02e9699126814c7cdf5eccadcdafd50d4dc2cdf3d9de95b33223cb578ccd12fa"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/socket/socket.blackbox_test.wasm",
+      "divergence": "D36",
+      "tests": {
+        "dual_stack_test.mbt": [1]
+      },
+      "fingerprints": {
+        "wasm": "e8b7ce73087d8c139237e6eac8c8e5966322336297df1062645f6ede3a75f71c"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "7fd0b026db0f160c32cce22a1838236d7a7e3ec86545d180c89e2052ef485b6e"
+      },
+      "stderrReports": {
+        "wasm": [
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.anon (<root>/async/internal/event_loop/event_loop.mbt:508)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend_check_cancel.anon (<root>/async/internal/event_loop/event_loop.mbt:199)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:62)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    at @moonbitlang/core/async.run_async_main (<root>/async/integration.mbt:22)\n    at moonbit_main (<root>/async/stdio/stdio.mbt:155)\n    ...\n",
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.anon (<root>/async/internal/event_loop/event_loop.mbt:508)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend_check_cancel.anon (<root>/async/internal/event_loop/event_loop.mbt:199)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:60)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    at @moonbitlang/core/async.run_async_main (<root>/async/integration.mbt:22)\n    at moonbit_main (<root>/async/stdio/stdio.mbt:155)\n    ...\n",
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:504)\n    at @moonbitlang/core/async/internal/coroutine.protect_from_cancel[Unit].anon (<root>/async/internal/coroutine/coroutine.mbt:239)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend.anon (<root>/async/internal/event_loop/event_loop.mbt:185)\n    at @moonbitlang/core/async/internal/coroutine.suspend.anon (<root>/async/internal/coroutine/coroutine.mbt:150)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:62)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    ...\n"
+        ]
+      }
+    },
+    {
+      "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D39",
+      "tests": {
+        "timestamp_test.mbt": [0]
+      },
+      "fingerprints": {
+        "wasm": "fbc842bebe3e93ac301bbe17266d6158aff3c98926df4044221428529b66c61a"
+      },
+      "flaky": true
+    },
+    {
+      "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D39",
+      "tests": {
+        "timestamp_test.mbt": [2]
+      },
+      "fingerprints": {
+        "wasm": "4553b9ad7dca6d7d4b524790ef6edd9d0a77df8bae5785b56522f77d4aec2be4"
+      },
+      "flaky": true
+    },
+    {
+      "suite": "core",
+      "invocation": "async/fs/fs.blackbox_test.wasm",
+      "divergence": "D39",
+      "tests": {
+        "timestamp_test.mbt": [0]
+      },
+      "fingerprints": {
+        "wasm": "0c2af4919961e3242cf159369f6d55d1a297c8b1e0ceb95f2d792128a38e0a44"
+      },
+      "flaky": true
+    },
+    {
+      "suite": "core",
+      "invocation": "async/fs/fs.blackbox_test.wasm",
+      "divergence": "D39",
+      "tests": {
+        "timestamp_test.mbt": [2]
+      },
+      "fingerprints": {
+        "wasm": "d6efb517dcc2a359b06eeb3833271db6072bbf0e9e2f75dcf2039278695e9b4a"
+      },
+      "flaky": true
     }
   ],
   "bun": [
@@ -106,28 +210,80 @@
       }
     },
     {
+      "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "7744e1f78e1967b1372e9449a029317fe9e2609af31e367ba0812884571bad9b"
+      }
+    },
+    {
       "suite": "core",
-      "invocation": "bench/bench.blackbox_test.wasm",
+      "invocation": "async/socket/socket.blackbox_test.wasm",
+      "divergence": "D33",
+      "tests": {
+        "multicast_test.mbt": [3]
+      },
+      "fingerprints": {
+        "wasm": "f4e83a01d2f97317b52b792a0e2d83cc3aacb81e480d336fb6c632b0cf52575d"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "async/fs/fs.blackbox_test.wasm",
+      "divergence": "D16",
+      "tests": {
+        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+      },
+      "fingerprints": {
+        "wasm": "7fd0b026db0f160c32cce22a1838236d7a7e3ec86545d180c89e2052ef485b6e"
+      },
+      "stderrReports": {
+        "wasm": [
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.anon (<root>/async/internal/event_loop/event_loop.mbt:508)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend_check_cancel.anon (<root>/async/internal/event_loop/event_loop.mbt:199)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:62)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    at @moonbitlang/core/async.run_async_main (<root>/async/integration.mbt:22)\n    at moonbit_main (<root>/async/stdio/stdio.mbt:155)\n    ...\n",
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.anon (<root>/async/internal/event_loop/event_loop.mbt:508)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend_check_cancel.anon (<root>/async/internal/event_loop/event_loop.mbt:199)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:60)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    at @moonbitlang/core/async.run_async_main (<root>/async/integration.mbt:22)\n    at moonbit_main (<root>/async/stdio/stdio.mbt:155)\n    ...\n",
+          "PanicError\n    at __moonbit_main.*async_driver (<root>/async/test_programs/lock_file/main.mbt:61)\n    at __moonbit_main.anon (<root>/async/test_programs/lock_file/main.mbt:47)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with read.anon (<root>/async/io/binary_reader.mbt:139)\n    at impl @moonbitlang/core/async/io.BinaryReader for $default_impl[@moonbitlang/core/async/stdio.Input] with peek.anon (<root>/async/io/binary_reader.mbt:186)\n    at impl @moonbitlang/core/async/io.BinaryReaderImpl for $default_impl[@moonbitlang/core/async/stdio.Input] with ensure_buffered.*async_driver.anon (<root>/async/io/binary_reader.mbt:99)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read.*async_driver.anon (<root>/async/internal/event_loop/io.mbt:271)\n    at @moonbitlang/core/async/internal/event_loop.IoHandle::read_via_worker.anon (<root>/async/internal/event_loop/io.mbt:145)\n    at @moonbitlang/core/async/internal/event_loop.perform_job_in_worker.inner.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:519)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::wait_for_job.*async_driver.anon (<root>/async/internal/event_loop/event_loop.mbt:504)\n    at @moonbitlang/core/async/internal/coroutine.protect_from_cancel[Unit].anon (<root>/async/internal/coroutine/coroutine.mbt:239)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::suspend.anon (<root>/async/internal/event_loop/event_loop.mbt:185)\n    at @moonbitlang/core/async/internal/coroutine.suspend.anon (<root>/async/internal/coroutine/coroutine.mbt:150)\n    at @moonbitlang/core/async/internal/coroutine.reschedule (<root>/async/internal/coroutine/scheduler.mbt:62)\n    at @moonbitlang/core/async/internal/event_loop.EventLoop::run_forever (<root>/async/internal/event_loop/event_loop.mbt:389)\n    at @moonbitlang/core/async/internal/event_loop.with_event_loop.inner (<root>/async/internal/event_loop/event_loop.mbt:171)\n    ...\n"
+        ]
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "abort/abort.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "README.mbt.md": [0]
+      },
+      "fingerprints": {
+        "wasm": "35a388238f9130a709591cdf293760c32e6897184c86313f35e7d75eb6b6ea90",
+        "wasm-gc": "35a388238f9130a709591cdf293760c32e6897184c86313f35e7d75eb6b6ea90"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "immut/sorted_set/sorted_set.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
         "panic_test.mbt": [0, 1, 2]
       },
       "fingerprints": {
-        "wasm": "1cc50928d26a955f92b9b6110d89a63c1051009a3f359126849577a233b464fb",
-        "wasm-gc": "1cc50928d26a955f92b9b6110d89a63c1051009a3f359126849577a233b464fb"
+        "wasm": "3e9d7d4eeec43719b123c91619a09edfa03d351d086eb09ca43840981f8a8c30",
+        "wasm-gc": "3e9d7d4eeec43719b123c91619a09edfa03d351d086eb09ca43840981f8a8c30"
       }
     },
     {
       "suite": "core",
-      "invocation": "bigint/bigint.blackbox_test.wasm",
+      "invocation": "list/list.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "octets_regression_test.mbt": [0],
-        "panic_test.mbt": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        "list_test.mbt": [14, 31],
+        "panic_test.mbt": [1, 2, 3, 4, 6]
       },
       "fingerprints": {
-        "wasm": "3e9e88bdbfc1ed6f880ed9449a7eb2eb52eabfe1e2f0232fb56aaeb7bada95f6",
-        "wasm-gc": "3efeb87a8fd806a14444e0685166445dde7eb5842c3745562642881375b0ddca"
+        "wasm": "b60a9331e6097cd8f4191009157cb46811c4e07039bb870b2b8ee582976af9d7",
+        "wasm-gc": "b60a9331e6097cd8f4191009157cb46811c4e07039bb870b2b8ee582976af9d7"
       }
     },
     {
@@ -138,127 +294,44 @@
         "buffer_test.mbt": [21, 22, 23]
       },
       "fingerprints": {
-        "wasm": "9778f0bf8027736ee2d7483bb99df73d081e1f6edbf58c853e47124b3e8428d3",
-        "wasm-gc": "9778f0bf8027736ee2d7483bb99df73d081e1f6edbf58c853e47124b3e8428d3"
+        "wasm": "0ebc5fec6469694bf8f11544fcfa47c8da0c8f580ce1780485c4bd51ba373f5a",
+        "wasm-gc": "0ebc5fec6469694bf8f11544fcfa47c8da0c8f580ce1780485c4bd51ba373f5a"
       }
     },
     {
       "suite": "core",
-      "invocation": "buffer/buffer.whitebox_test.wasm",
+      "invocation": "immut/vector/vector.whitebox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "buffer_growth_wbtest.mbt": [3]
+        "panic_wbtest.mbt": [0, 1]
       },
       "fingerprints": {
-        "wasm": "60765307b54e83aa45d73f3560f64c0d95f3cbc63f0f08482ba09eb1616322d6",
-        "wasm-gc": "60765307b54e83aa45d73f3560f64c0d95f3cbc63f0f08482ba09eb1616322d6"
+        "wasm": "8a197eacb3940aa1dcd3eda73b9776c8f6381bc1c2dabe0439fb6133f43896e7",
+        "wasm-gc": "8a197eacb3940aa1dcd3eda73b9776c8f6381bc1c2dabe0439fb6133f43896e7"
       }
     },
     {
       "suite": "core",
-      "invocation": "builtin/builtin.blackbox_test.wasm",
+      "invocation": "immut/vector/vector.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "array_test.mbt": [50, 60, 64, 130, 131],
-        "arrayview_test.mbt": [3, 4, 5, 6, 8, 10, 11, 12, 13],
-        "assert_debug_test.mbt": [1],
-        "bitstring_test.mbt": [2, 3, 4, 5, 6, 7, 8, 9],
-        "bytes_test.mbt": [21, 24, 26, 39, 40, 41, 42, 43],
-        "bytesview_test.mbt": [3, 4, 5],
-        "char_test.mbt": [6],
-        "clamped_view_test.mbt": [36, 37, 38, 39],
-        "double_test.mbt": [4, 6, 7, 8],
-        "exact_view_test.mbt": [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14],
-        "fixedarray_block_test.mbt": [0],
-        "fixedarray_test.mbt": [40],
-        "int64_additional_test.mbt": [3],
-        "int64_test.mbt": [1015, 1016, 1017, 1018],
-        "mutarrayview_test.mbt": [5, 6, 7, 8, 9, 10, 11, 12, 17, 18, 19, 20],
-        "output_test.mbt": [1],
-        "panic_nonjs_test.mbt": [0],
-        "panic_test.mbt": [
-          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-          25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37
-        ],
-        "result_test.mbt": [5, 6],
-        "string_char_length_test.mbt": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
-        "string_test.mbt": [1, 6, 9, 19, 20, 21, 24, 28],
-        "stringbuilder_test.mbt": [6],
-        "stringview_test.mbt": [9, 10, 11, 12, 13, 14, 15, 18, 19],
-        "to_string_test.mbt": [2, 3, 5],
-        "uint_test.mbt": [1]
+        "panic_test.mbt": [0, 1, 2, 3, 4, 5, 6, 7]
       },
       "fingerprints": {
-        "wasm": "f33ea59596f3ae217a8d84c8465adb633ed60a974510e1382965d14d2fda7d14",
-        "wasm-gc": "5f87ce3d60cc093426e0b4141e21c663c017a6db19e7d5af7d9ee27bc85a19f9"
+        "wasm": "68f2067f058f1259d2be8c6d3e7aee3fae905c0f0f242c4b68f25ce50a7355ee",
+        "wasm-gc": "68f2067f058f1259d2be8c6d3e7aee3fae905c0f0f242c4b68f25ce50a7355ee"
       }
     },
     {
       "suite": "core",
-      "invocation": "builtin/builtin.internal_test.wasm",
+      "invocation": "hashmap/hashmap.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "array_block.mbt": [5, 6, 7, 8, 9, 18, 19],
-        "arraycore_nonjs.mbt": [3],
-        "string.mbt": [1, 4],
-        "string_methods.mbt": [28, 29],
-        "to_string.mbt": [2],
-        "uninitialized_array.mbt": [1, 2]
+        "hashmap_test.mbt": [12]
       },
       "fingerprints": {
-        "wasm": "38b2c8acb8bf2f02025e57a46e4ef7e08a16d1980441db770d165a4cb64e429b",
-        "wasm-gc": "38b2c8acb8bf2f02025e57a46e4ef7e08a16d1980441db770d165a4cb64e429b"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "builtin/builtin.whitebox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "linked_hash_map_wbtest.mbt": [15],
-        "panic_wbtest.mbt": [0, 1],
-        "stringbuilder_buffer_wbtest.mbt": [2]
-      },
-      "fingerprints": {
-        "wasm": "c04b30e8bd52e0160cff3d7ac363f5395c2933dac57959de44788e690c694f59",
-        "wasm-gc": "c04b30e8bd52e0160cff3d7ac363f5395c2933dac57959de44788e690c694f59"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "bytes/bytes.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "bytes_test.mbt": [17, 18, 23, 24],
-        "view_test.mbt": [3, 4, 5, 6, 7, 8, 11, 12, 18, 23]
-      },
-      "fingerprints": {
-        "wasm": "3a792b6a3769f095aeae29d0b9150d5ae8f86270b5e5ac6bc382e1fc18703115",
-        "wasm-gc": "3a792b6a3769f095aeae29d0b9150d5ae8f86270b5e5ac6bc382e1fc18703115"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "char/char.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "char_test.mbt": [16]
-      },
-      "fingerprints": {
-        "wasm": "892c1ca1275d01c88348de7d989bd60bf2a6231ee37ea0d357383fbf8ce16a55",
-        "wasm-gc": "892c1ca1275d01c88348de7d989bd60bf2a6231ee37ea0d357383fbf8ce16a55"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "deque/deque.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-      },
-      "fingerprints": {
-        "wasm": "6f12e6304243df47f08ee646f7c758bd283911e3b2abdc48024be25f67504ba1",
-        "wasm-gc": "6f12e6304243df47f08ee646f7c758bd283911e3b2abdc48024be25f67504ba1"
+        "wasm": "dbb44d3de155b6a656910a93c7697933ad596e0ddad86e4e99f59c04e3789cc3",
+        "wasm-gc": "dbb44d3de155b6a656910a93c7697933ad596e0ddad86e4e99f59c04e3789cc3"
       }
     },
     {
@@ -269,44 +342,58 @@
         "diff_test.mbt": [5]
       },
       "fingerprints": {
-        "wasm": "a884b7ef807cb6884582b3528edda9a7255c71ce9079fbe0bd04d698a7f58187",
-        "wasm-gc": "a884b7ef807cb6884582b3528edda9a7255c71ce9079fbe0bd04d698a7f58187"
+        "wasm": "98dae73eae698e7f71a310eb5b518a681d12b090a7606ce8001b8c825d781876",
+        "wasm-gc": "98dae73eae698e7f71a310eb5b518a681d12b090a7606ce8001b8c825d781876"
       }
     },
     {
       "suite": "core",
-      "invocation": "encoding/utf8/utf8.blackbox_test.wasm",
+      "invocation": "result/result.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "encode_test.mbt": [3, 4]
+        "panic_test.mbt": [0]
       },
       "fingerprints": {
-        "wasm": "a9f4aae927c19425939f9c0e13fb773f563d2b16cf1d4fe5022fd0a5ec64dd3a",
-        "wasm-gc": "a9f4aae927c19425939f9c0e13fb773f563d2b16cf1d4fe5022fd0a5ec64dd3a"
+        "wasm": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a",
+        "wasm-gc": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a"
       }
     },
     {
       "suite": "core",
-      "invocation": "float/float.blackbox_test.wasm",
+      "invocation": "bigint/bigint.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "float_test.mbt": [13, 16]
+        "octets_regression_test.mbt": [0],
+        "panic_test.mbt": [0, 10, 11, 12, 13, 1, 2, 3, 4, 5, 6, 7, 8, 9]
       },
       "fingerprints": {
-        "wasm": "92cf78c20e96f6c0c03a47854b7349e6af53bd14e664004af7e7ac455883bb3a",
-        "wasm-gc": "92cf78c20e96f6c0c03a47854b7349e6af53bd14e664004af7e7ac455883bb3a"
+        "wasm": "64103227ae1b41d8188fcdeb226c5e0da352249cc37e22be3c695bc1883b3a78",
+        "wasm-gc": "d1626e2623897b8ee41899505c9017049ccbb486418755ae09d92d9c1c0b2380"
       }
     },
     {
       "suite": "core",
-      "invocation": "hashmap/hashmap.blackbox_test.wasm",
+      "invocation": "bytes/bytes.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "hashmap_test.mbt": [11]
+        "bytes_test.mbt": [17, 18, 23, 24],
+        "view_test.mbt": [11, 12, 18, 23, 3, 4, 5, 6, 7, 8]
       },
       "fingerprints": {
-        "wasm": "4b4197f74cc0d2f57a1bcd1799e2e970a829f07b72b187740078c196f31f4909",
-        "wasm-gc": "4b4197f74cc0d2f57a1bcd1799e2e970a829f07b72b187740078c196f31f4909"
+        "wasm": "e4b7eb59c60e090293c3f2431026d4672e80a1cdaf993bb1beeef4dff7d8ced3",
+        "wasm-gc": "e4b7eb59c60e090293c3f2431026d4672e80a1cdaf993bb1beeef4dff7d8ced3"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "priority_queue/priority_queue.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0]
+      },
+      "fingerprints": {
+        "wasm": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a",
+        "wasm-gc": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a"
       }
     },
     {
@@ -323,14 +410,31 @@
     },
     {
       "suite": "core",
-      "invocation": "immut/priority_queue/priority_queue.blackbox_test.wasm",
+      "invocation": "lexbuf/lexbuf.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "panic_test.mbt": [0]
+        "panic_test.mbt": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
       },
       "fingerprints": {
-        "wasm": "2f6345985f43f1452eae9a8b00cc2d4e15e258a82aeb9ac783ba89725c6ea89f",
-        "wasm-gc": "2f6345985f43f1452eae9a8b00cc2d4e15e258a82aeb9ac783ba89725c6ea89f"
+        "wasm": "9be450cd3dd770ed47efeee83f173b2407ed0bc6ab30a1e6b20ca52d624069ca",
+        "wasm-gc": "9be450cd3dd770ed47efeee83f173b2407ed0bc6ab30a1e6b20ca52d624069ca"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "builtin/builtin.internal_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "array.mbt": [3],
+        "array_block.mbt": [18, 19, 5, 6, 7, 8, 9],
+        "string.mbt": [1, 4],
+        "string_methods.mbt": [28, 29],
+        "to_string.mbt": [2],
+        "uninitialized_array.mbt": [1, 2]
+      },
+      "fingerprints": {
+        "wasm": "bbc5e02f0ac971c7dbe267d10534ef10132755393ab879cadfa727363d69307e",
+        "wasm-gc": "bbc5e02f0ac971c7dbe267d10534ef10132755393ab879cadfa727363d69307e"
       }
     },
     {
@@ -338,240 +442,11 @@
       "invocation": "immut/sorted_map/sorted_map.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
-        "utils_test.mbt": [7, 8, 11]
+        "utils_test.mbt": [11, 7, 8]
       },
       "fingerprints": {
         "wasm": "cfe736fcb54ca46b6a81e86c3ee9e4ea091ef8d108bad6a1f3840aafbbb9532c",
         "wasm-gc": "cfe736fcb54ca46b6a81e86c3ee9e4ea091ef8d108bad6a1f3840aafbbb9532c"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "immut/sorted_map/sorted_map.whitebox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_wbtest.mbt": [0, 1]
-      },
-      "fingerprints": {
-        "wasm": "87c7feb6fe528ad1cf981a5af727a3653b4c37c4794378907f29fe756231641c",
-        "wasm-gc": "87c7feb6fe528ad1cf981a5af727a3653b4c37c4794378907f29fe756231641c"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "immut/sorted_set/sorted_set.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0, 1, 2]
-      },
-      "fingerprints": {
-        "wasm": "1cc50928d26a955f92b9b6110d89a63c1051009a3f359126849577a233b464fb",
-        "wasm-gc": "1cc50928d26a955f92b9b6110d89a63c1051009a3f359126849577a233b464fb"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "immut/vector_map/vector_map.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "vector_map_test.mbt": [4]
-      },
-      "fingerprints": {
-        "wasm": "7fc97438e2cdc71d9fe659fdffc377a3dfc6d25c1de158ff41d0565c9846d6cb",
-        "wasm-gc": "7fc97438e2cdc71d9fe659fdffc377a3dfc6d25c1de158ff41d0565c9846d6cb"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "immut/vector/vector.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0, 1, 2, 3, 4, 5, 6, 7]
-      },
-      "fingerprints": {
-        "wasm": "50b3562560a13215b489a9d48870f3b23a8eacc05fe7a244d49ccf1bd0df1a1a",
-        "wasm-gc": "50b3562560a13215b489a9d48870f3b23a8eacc05fe7a244d49ccf1bd0df1a1a"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "immut/vector/vector.whitebox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_wbtest.mbt": [0, 1]
-      },
-      "fingerprints": {
-        "wasm": "87c7feb6fe528ad1cf981a5af727a3653b4c37c4794378907f29fe756231641c",
-        "wasm-gc": "87c7feb6fe528ad1cf981a5af727a3653b4c37c4794378907f29fe756231641c"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "lazy_list/lazy_list.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0, 1]
-      },
-      "fingerprints": {
-        "wasm": "2d744c82275c8cf85bd5b2012b648448047642cfb9892da4bb711b95256613b6",
-        "wasm-gc": "2d744c82275c8cf85bd5b2012b648448047642cfb9892da4bb711b95256613b6"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "lazy/lazy.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0]
-      },
-      "fingerprints": {
-        "wasm": "95023378d881ac7afd6f3c06022401872eb7fe6aad3b1122f17034cb63c2cf33",
-        "wasm-gc": "95023378d881ac7afd6f3c06022401872eb7fe6aad3b1122f17034cb63c2cf33"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "lexbuf/lexbuf.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0, 1, 2, 3, 4, 5]
-      },
-      "fingerprints": {
-        "wasm": "647dd6247daf3c837296915e853b7ce7d75425e0e5c708f818867e8be7ee5909",
-        "wasm-gc": "647dd6247daf3c837296915e853b7ce7d75425e0e5c708f818867e8be7ee5909"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "lexbuf/lexbuf.whitebox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "storage_wbtest.mbt": [6, 7, 8]
-      },
-      "fingerprints": {
-        "wasm": "cc3cd66b63cf5a9d772d58a2f619697b86cd227bbd8802875b1f5b864c22ef14",
-        "wasm-gc": "cc3cd66b63cf5a9d772d58a2f619697b86cd227bbd8802875b1f5b864c22ef14"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "list/list.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "list_test.mbt": [14, 31],
-        "panic_test.mbt": [1, 2, 3, 4, 6]
-      },
-      "fingerprints": {
-        "wasm": "926619651d22a82f01206a51d9f9ba72e3b693a1b06acd09923a819d7c9a554c",
-        "wasm-gc": "926619651d22a82f01206a51d9f9ba72e3b693a1b06acd09923a819d7c9a554c"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "math/math.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "prime_test.mbt": [2, 7, 8, 9]
-      },
-      "fingerprints": {
-        "wasm": "9ba23ba0ff930c8d30b6df5427e30c33af1ce6be34704c1354da4d50feff7ac6",
-        "wasm-gc": "9ba23ba0ff930c8d30b6df5427e30c33af1ce6be34704c1354da4d50feff7ac6"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "option/option.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0]
-      },
-      "fingerprints": {
-        "wasm": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a",
-        "wasm-gc": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "priority_queue/priority_queue.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0]
-      },
-      "fingerprints": {
-        "wasm": "2f6345985f43f1452eae9a8b00cc2d4e15e258a82aeb9ac783ba89725c6ea89f",
-        "wasm-gc": "2f6345985f43f1452eae9a8b00cc2d4e15e258a82aeb9ac783ba89725c6ea89f"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "queue/queue.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0, 1]
-      },
-      "fingerprints": {
-        "wasm": "38ddaa265fef80820c972bf7d1bc3c9102fe000e6940ff2f4ee1b2fe48222d03",
-        "wasm-gc": "38ddaa265fef80820c972bf7d1bc3c9102fe000e6940ff2f4ee1b2fe48222d03"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "quickcheck/quickcheck.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "generator_test.mbt": [7]
-      },
-      "fingerprints": {
-        "wasm": "6542e2add4584139d1ddf06471495c8d8565d855ebeae9962410f7751814ce30",
-        "wasm-gc": "6542e2add4584139d1ddf06471495c8d8565d855ebeae9962410f7751814ce30"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "quickcheck/splitmix/splitmix.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "random_test.mbt": [8, 9]
-      },
-      "fingerprints": {
-        "wasm": "74b67bac98359b4f449ba969b61aacf41d8c660d7011005b2285798c8c3ad9c1",
-        "wasm-gc": "74b67bac98359b4f449ba969b61aacf41d8c660d7011005b2285798c8c3ad9c1"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "random/internal/random_source/random_source.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "random_source_test.mbt": [0, 1]
-      },
-      "fingerprints": {
-        "wasm": "7bc1b89ed992cb105e4aa0e207124c178c63232d654d3bf3f17922f8185e8059",
-        "wasm-gc": "7bc1b89ed992cb105e4aa0e207124c178c63232d654d3bf3f17922f8185e8059"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "random/random.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "random_test.mbt": [15, 16, 17, 18, 19, 20, 21, 27, 28, 29, 30]
-      },
-      "fingerprints": {
-        "wasm": "14c9a0a2e8d9fe13bcf00b2c10aadba1ea739310a7df7426ed4468947a79624c",
-        "wasm-gc": "14c9a0a2e8d9fe13bcf00b2c10aadba1ea739310a7df7426ed4468947a79624c"
-      }
-    },
-    {
-      "suite": "core",
-      "invocation": "result/result.blackbox_test.wasm",
-      "divergence": "D3",
-      "tests": {
-        "panic_test.mbt": [0]
-      },
-      "fingerprints": {
-        "wasm": "2f6345985f43f1452eae9a8b00cc2d4e15e258a82aeb9ac783ba89725c6ea89f",
-        "wasm-gc": "2f6345985f43f1452eae9a8b00cc2d4e15e258a82aeb9ac783ba89725c6ea89f"
       }
     },
     {
@@ -600,6 +475,280 @@
     },
     {
       "suite": "core",
+      "invocation": "immut/sorted_map/sorted_map.whitebox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_wbtest.mbt": [0, 1]
+      },
+      "fingerprints": {
+        "wasm": "8a197eacb3940aa1dcd3eda73b9776c8f6381bc1c2dabe0439fb6133f43896e7",
+        "wasm-gc": "8a197eacb3940aa1dcd3eda73b9776c8f6381bc1c2dabe0439fb6133f43896e7"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "buffer/buffer.whitebox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "buffer_growth_wbtest.mbt": [3]
+      },
+      "fingerprints": {
+        "wasm": "2c2bf6592a3dcd59ae08b57fe3513e3b81585ec2ee524f6e1b5868288c019220",
+        "wasm-gc": "2c2bf6592a3dcd59ae08b57fe3513e3b81585ec2ee524f6e1b5868288c019220"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "float/float.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "float_test.mbt": [15, 18]
+      },
+      "fingerprints": {
+        "wasm": "4a716241e10d0025300a081a8d1ebe8ec93a7ab824c7db8b3b545861b02447cb",
+        "wasm-gc": "4a716241e10d0025300a081a8d1ebe8ec93a7ab824c7db8b3b545861b02447cb"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "immut/vector_map/vector_map.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "vector_map_test.mbt": [4]
+      },
+      "fingerprints": {
+        "wasm": "7fc97438e2cdc71d9fe659fdffc377a3dfc6d25c1de158ff41d0565c9846d6cb",
+        "wasm-gc": "7fc97438e2cdc71d9fe659fdffc377a3dfc6d25c1de158ff41d0565c9846d6cb"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "char/char.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "char_test.mbt": [16]
+      },
+      "fingerprints": {
+        "wasm": "892c1ca1275d01c88348de7d989bd60bf2a6231ee37ea0d357383fbf8ce16a55",
+        "wasm-gc": "892c1ca1275d01c88348de7d989bd60bf2a6231ee37ea0d357383fbf8ce16a55"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "lexbuf/lexbuf.whitebox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "storage_wbtest.mbt": [6, 7, 8]
+      },
+      "fingerprints": {
+        "wasm": "43e26dd25984c86fc0b43d71da7418c229f4f9a0ca668cbf05cb41580656440b",
+        "wasm-gc": "43e26dd25984c86fc0b43d71da7418c229f4f9a0ca668cbf05cb41580656440b"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "random/internal/random_source/random_source.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "random_source_test.mbt": [0, 1]
+      },
+      "fingerprints": {
+        "wasm": "3da1b4641de307c0b9751df6272372de2ba01b53d534cb3d78b4d3183a759aa8",
+        "wasm-gc": "3da1b4641de307c0b9751df6272372de2ba01b53d534cb3d78b4d3183a759aa8"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "builtin/builtin.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "array_test.mbt": [131, 132, 50, 60, 64],
+        "arrayview_test.mbt": [10, 11, 12, 13, 3, 4, 5, 6, 8],
+        "assert_debug_test.mbt": [1],
+        "bitstring_test.mbt": [2, 3, 4, 5, 6, 7, 8, 9],
+        "bytes_test.mbt": [21, 24, 26, 39, 40, 41, 42, 43],
+        "bytesview_test.mbt": [3, 4, 5],
+        "char_test.mbt": [6],
+        "clamped_view_test.mbt": [36, 37, 38, 39],
+        "double_test.mbt": [4, 6, 7, 8],
+        "exact_view_test.mbt": [10, 13, 14, 2, 3, 4, 5, 6, 7, 8, 9],
+        "fixedarray_block_test.mbt": [0],
+        "fixedarray_test.mbt": [40],
+        "int64_additional_test.mbt": [3],
+        "int64_test.mbt": [1015, 1016, 1017, 1018],
+        "mutarrayview_test.mbt": [10, 11, 12, 17, 18, 19, 20, 24, 25, 5, 6, 7, 8, 9],
+        "output_test.mbt": [1],
+        "panic_nonjs_test.mbt": [0],
+        "panic_test.mbt": [
+          0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 1, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 2,
+          30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 3, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 4, 50,
+          51, 52, 53, 54, 55, 56, 57, 58, 59, 5, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 6, 70, 71,
+          72, 73, 74, 75, 7, 8, 9
+        ],
+        "result_test.mbt": [5, 6],
+        "string_char_length_test.mbt": [10, 11, 12, 13, 14, 15, 16, 17, 6, 7, 8, 9],
+        "string_test.mbt": [19, 1, 20, 21, 24, 28, 6, 9],
+        "stringbuilder_test.mbt": [4, 8],
+        "stringview_test.mbt": [10, 11, 12, 13, 14, 15, 18, 19, 9],
+        "to_string_test.mbt": [2, 3, 5],
+        "uint64_test.mbt": [2, 3],
+        "uint_test.mbt": [1],
+        "unsafe_view_test.mbt": [6, 7]
+      },
+      "fingerprints": {
+        "wasm": "02b04e6788aac8cbb426fba7accdef311243d075dec9b3c8256e4821403f9342",
+        "wasm-gc": "ec8621f55a752741db039cd69f026255292979e199ff187ea01add364e26efe8"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "lazy_list/lazy_list.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0, 1]
+      },
+      "fingerprints": {
+        "wasm": "2d744c82275c8cf85bd5b2012b648448047642cfb9892da4bb711b95256613b6",
+        "wasm-gc": "2d744c82275c8cf85bd5b2012b648448047642cfb9892da4bb711b95256613b6"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "quickcheck/quickcheck.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "generator_test.mbt": [7]
+      },
+      "fingerprints": {
+        "wasm": "5ef00db489c4f21a3fdfbea5c8c3194bbbb6716c8d8d86c31e75c15460ce2dae",
+        "wasm-gc": "5ef00db489c4f21a3fdfbea5c8c3194bbbb6716c8d8d86c31e75c15460ce2dae"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "quickcheck/splitmix/splitmix.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "random_test.mbt": [10, 9]
+      },
+      "fingerprints": {
+        "wasm": "35fc885f76aae9e1971388efa45b598945bd470e820ddb5ed970752ee81bff3e",
+        "wasm-gc": "35fc885f76aae9e1971388efa45b598945bd470e820ddb5ed970752ee81bff3e"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "queue/queue.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0, 1]
+      },
+      "fingerprints": {
+        "wasm": "3ec3fd72b843b6502e6c679e22320e99bcf7604aba6087e9edae8b1c855d01cb",
+        "wasm-gc": "3ec3fd72b843b6502e6c679e22320e99bcf7604aba6087e9edae8b1c855d01cb"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "immut/priority_queue/priority_queue.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0]
+      },
+      "fingerprints": {
+        "wasm": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a",
+        "wasm-gc": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "option/option.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0]
+      },
+      "fingerprints": {
+        "wasm": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a",
+        "wasm-gc": "9a0ad12fb83010dafec02017060553a44b76083f9aac0b888f12a6146b914a8a"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "deque/deque.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0, 10, 11, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      },
+      "fingerprints": {
+        "wasm": "187d09266174701cfbf6b831738432e4e73725373ab2c7ccb79131e74766471e",
+        "wasm-gc": "187d09266174701cfbf6b831738432e4e73725373ab2c7ccb79131e74766471e"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "random/random.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "random_test.mbt": [15, 16, 17, 18, 19, 20, 21, 27, 28, 29, 30]
+      },
+      "fingerprints": {
+        "wasm": "8e627bfeeb5c54fac7d978a8323daa704d23703244f5d2f9c753cb386aaad0a0",
+        "wasm-gc": "8e627bfeeb5c54fac7d978a8323daa704d23703244f5d2f9c753cb386aaad0a0"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "math/math.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "prime_test.mbt": [2, 7, 8, 9]
+      },
+      "fingerprints": {
+        "wasm": "135da6216babc19cf11373689ae1945a1296db40078b536d93909dfc1b7c4b2b",
+        "wasm-gc": "135da6216babc19cf11373689ae1945a1296db40078b536d93909dfc1b7c4b2b"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "bench/bench.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0, 1, 2]
+      },
+      "fingerprints": {
+        "wasm": "1cc50928d26a955f92b9b6110d89a63c1051009a3f359126849577a233b464fb",
+        "wasm-gc": "1cc50928d26a955f92b9b6110d89a63c1051009a3f359126849577a233b464fb"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "encoding/utf8/utf8.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "encode_test.mbt": [3, 4]
+      },
+      "fingerprints": {
+        "wasm": "0a295a2484c5c7d03132977c6f33928cfa79dd3d686efd7316dd723009f8f0a8",
+        "wasm-gc": "0a295a2484c5c7d03132977c6f33928cfa79dd3d686efd7316dd723009f8f0a8"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "builtin/builtin.whitebox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "linked_hash_map_wbtest.mbt": [16],
+        "panic_wbtest.mbt": [0, 1, 2],
+        "string_join_wbtest.mbt": [1],
+        "stringbuilder_buffer_wbtest.mbt": [4]
+      },
+      "fingerprints": {
+        "wasm": "fc39d7116e1301a2eb4dc0ec67ecb1600074eb603b931955520b95dee41fc5b9",
+        "wasm-gc": "fc39d7116e1301a2eb4dc0ec67ecb1600074eb603b931955520b95dee41fc5b9"
+      }
+    },
+    {
+      "suite": "core",
       "invocation": "string/string.blackbox_test.wasm",
       "divergence": "D3",
       "tests": {
@@ -611,19 +760,42 @@
         ]
       },
       "fingerprints": {
-        "wasm": "953bdf614e4c989bf81dc5364c65f673b9ff8fd0473ecba34c481e366360b61b",
-        "wasm-gc": "953bdf614e4c989bf81dc5364c65f673b9ff8fd0473ecba34c481e366360b61b"
+        "wasm": "5283abadb52eab118e017cba3555029705d0d0b251d2715242528e3742141439",
+        "wasm-gc": "5283abadb52eab118e017cba3555029705d0d0b251d2715242528e3742141439"
       }
     },
     {
-      "suite": "async",
-      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
-      "divergence": "D16",
+      "suite": "core",
+      "invocation": "compress/flate/flate.whitebox_test.wasm",
+      "divergence": "D3",
       "tests": {
-        "lock_test.mbt": [0, 1, 2, 3, 4, 5, 8, 9, 10]
+        "bitwriter_wbtest.mbt": [3]
       },
       "fingerprints": {
-        "wasm": "170ebe6d2e657999f907551ff0ce27ab77b8d2bd9de882561e6389ba39cf0f64"
+        "wasm": "d724571262de2d5e10b191a96e6c6990c8860fdbd8af125d4bad9e7cc4334e50"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "lazy/lazy.blackbox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "panic_test.mbt": [0]
+      },
+      "fingerprints": {
+        "wasm": "95023378d881ac7afd6f3c06022401872eb7fe6aad3b1122f17034cb63c2cf33",
+        "wasm-gc": "95023378d881ac7afd6f3c06022401872eb7fe6aad3b1122f17034cb63c2cf33"
+      }
+    },
+    {
+      "suite": "core",
+      "invocation": "compress/flate/flate.whitebox_test.wasm",
+      "divergence": "D3",
+      "tests": {
+        "bitwriter_wbtest.mbt": [2]
+      },
+      "fingerprints": {
+        "wasm-gc": "a5d4041672d5d63edecc2afd5cb302b05d7e2da9f31ec1ecc6c40d2781b46c00"
       }
     }
   ]

@@ -1,18 +1,14 @@
-// `__moonbit_fs_unstable`: the V8 adapter half of moonrun's legacy filesystem imports
-// (filesystem/v8/whole_file.rs, runtime.rs). The operations themselves, including policy
-// checks and their texts, are the Host Filesystem and `Env` of the moonrun-policy
-// component (ctx.policy()); this file only converts guest values and reports failures
-// the way the adapter does (a Rust panic for the legacy imports, a status code otherwise).
+// `__moonbit_fs_unstable`: the adapter half of moonrun's legacy filesystem imports
+// (unstable_api.rs). The operations themselves, including policy checks and their texts,
+// are the Host Filesystem and `Env` of the moonrun-policy component (ctx.policy(), its
+// `unstable_api/filesystem.rs`); this file only converts guest values and reports failures
+// the way the adapter does (a host error for the legacy imports, a status code otherwise).
 import type { ImportFamily, RunContext } from '../context.ts';
 import { fn, type ModuleImports } from '../define.ts';
-import { rustPanic } from '../panic.ts';
 import { lossyString, valueHelpers } from './fs-values.ts';
 
-const WHOLE_FILE_RS = 'crates/moonrun/src/filesystem/v8/whole_file.rs';
-const NOT_UINT8ARRAY = 'Failed to convert contents to Uint8Array';
-/** `v8::Local::<v8::Uint8Array>::try_from(args.get(1)).unwrap()` on another value. */
-const BAD_TYPE =
-  'called `Result::unwrap()` on an `Err` value: BadType { actual: "v8::data::Value", expected: "v8::data::Uint8Array" }';
+/** `Values::bytes` on a value that is not a `Uint8Array` (`v8/values.rs`). */
+const NOT_UINT8ARRAY = 'Expected a Uint8Array';
 
 /** `args_get` and the environment imports (filesystem/v8/runtime.rs) over the run's `Env`. */
 function runtimeImports(ctx: RunContext): ModuleImports {
@@ -36,25 +32,21 @@ function runtimeImports(ctx: RunContext): ModuleImports {
   };
 }
 
-/** The imports whose failure is a Rust panic (`whole_file.rs` line numbers). */
+/** The imports whose failure is a host error (`ImportError::Host`), ending the run. */
 function legacyImports(ctx: RunContext): ModuleImports {
   const fs = () => ctx.policy();
-  /** `.unwrap_or_else(|error| panic!("{error}"))` at `whole_file.rs:<line>:33`. */
-  const orPanic = <T>(
-    line: number,
-    result: { ok: true; value: T } | { ok: false; error: string },
-  ): T => {
+  const orFail = <T>(result: { ok: true; value: T } | { ok: false; error: string }): T => {
     if (!result.ok) {
-      return rustPanic(ctx, `${WHOLE_FILE_RS}:${line}:33`, result.error);
+      throw new Error(result.error);
     }
     return result.value;
   };
   return {
     read_file_to_string: fn(['externref'], 'externref', (p) =>
-      orPanic(63, fs().readFileToString(lossyString(p))),
+      orFail(fs().readFileToString(lossyString(p))),
     ),
     write_string_to_file: fn(['externref', 'externref'], 'void', (p, contents) => {
-      orPanic(79, fs().writeStringToFile(lossyString(p), lossyString(contents)));
+      orFail(fs().writeStringToFile(lossyString(p), lossyString(contents)));
     }),
     write_bytes_to_file: fn(['externref', 'externref'], 'void', (p, contents) => {
       const result = fs().writeBytesToFile(
@@ -62,21 +54,21 @@ function legacyImports(ctx: RunContext): ModuleImports {
         contents instanceof Uint8Array ? contents : undefined,
       );
       if (result === 'not-bytes') {
-        rustPanic(ctx, `${WHOLE_FILE_RS}:93:76`, BAD_TYPE);
+        throw new Error(NOT_UINT8ARRAY);
       }
-      orPanic(96, result);
+      orFail(result);
     }),
     create_dir: fn(['externref'], 'void', (p) => {
-      orPanic(110, fs().createDir(lossyString(p)));
+      orFail(fs().createDir(lossyString(p)));
     }),
-    read_dir: fn(['externref'], 'externref', (p) => orPanic(124, fs().readDir(lossyString(p)))),
+    read_dir: fn(['externref'], 'externref', (p) => orFail(fs().readDir(lossyString(p)))),
     is_file: fn(['externref'], 'i32', (p) => (fs().isFile(lossyString(p)) ? 1 : 0)),
     is_dir: fn(['externref'], 'i32', (p) => (fs().isDir(lossyString(p)) ? 1 : 0)),
     remove_file: fn(['externref'], 'void', (p) => {
-      orPanic(163, fs().removeFile(lossyString(p)));
+      orFail(fs().removeFile(lossyString(p)));
     }),
     remove_dir: fn(['externref'], 'void', (p) => {
-      orPanic(177, fs().removeDir(lossyString(p)));
+      orFail(fs().removeDir(lossyString(p)));
     }),
     path_exists: fn(['externref'], 'i32', (p) => (fs().pathExists(lossyString(p)) ? 1 : 0)),
     current_dir: fn([], 'externref', () => fs().currentDir()),

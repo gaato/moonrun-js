@@ -1,0 +1,944 @@
+// upstream: moonbitlang/moon@940aa18df6db921386e87e16fa94b84fa267864b crates/moonrun/src/filesystem/host.rs (rewrites: std-os ×10, std-fs ×32, std-fs-io-module ×1)
+// moon: The build system and package manager for MoonBit.
+// Copyright (C) 2026 International Digital Economy Academy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// For inquiries, you can contact us via e-mail at jichuruanjian@idea.edu.cn.
+
+//! Runtime filesystem interpretation and authorization, shared across import families.
+//! ABI adapters own descriptor rights, value conversion, and error presentation.
+//! Standard-library operations and `os` provide the filesystem mechanisms.
+
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+use std::io;
+use crate::os::fs;
+
+use super::{FileGrant, FileOperation};
+use crate::async_sys::fs::stub;
+use crate::policy::{FsIntents, FsPolicy};
+use crate::runtime::{Env, WorkingDirectory};
+
+/// Preserve policy denial separately from OS errors for each caller's ABI.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FsError {
+    #[error("filesystem access denied by policy")]
+    Denied,
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+/// One source for both native open options and their authorization intent.
+pub(crate) struct FileOpenOptions {
+    pub(crate) read: bool,
+    pub(crate) write: bool,
+    pub(crate) append: bool,
+    pub(crate) create: bool,
+    pub(crate) create_new: bool,
+    pub(crate) truncate: bool,
+}
+
+/// An acquired directory, independent of guest descriptor numbering and rights.
+/// Its pathname is queried only for authorization and path-only operations.
+pub(crate) struct Directory {
+    file: fs::File,
+}
+
+impl Directory {
+    /// Runtime configuration acquires a preopen without granting guest access.
+    /// HostFs still authorizes each operation using its requested effects.
+    pub(crate) fn preopen(path: &Path) -> io::Result<Self> {
+        use super::os::{
+            DirectIo,
+            openat::{self, Access, CreateMode, OpenOptions, Sync, TypeConstraint},
+        };
+        Ok(Self {
+            file: openat::open(
+                None,
+                path.as_os_str(),
+                &OpenOptions {
+                    access: Access::TraverseDirectory,
+                    type_constraint: TypeConstraint::Directory,
+                    follow_symlink: true,
+                    is_async: false,
+                    create: CreateMode::Open,
+                    append: false,
+                    sync: Sync::None,
+                    permission: 0,
+                },
+                &DirectIo,
+            )?,
+        })
+    }
+
+    pub(crate) fn path(&self) -> Result<PathBuf, FsError> {
+        directory_path_for_authorization(super::os::raw_file(&self.file))
+    }
+}
+
+fn directory_path_for_authorization(handle: super::os::RawFile) -> Result<PathBuf, FsError> {
+    // An unlinked directory cannot receive a fresh pathname-based grant.
+    super::os::directory::path(handle).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            FsError::Denied
+        } else {
+            FsError::Io(error)
+        }
+    })
+}
+
+/// Keep Unix relative traversal intact. Absolute paths and Windows DOS paths
+/// need conversion to a name relative to the acquired handle. Resolve only the
+/// parent: following the final link here would change unlink and exclusive-open
+/// semantics before their OS operation gets to interpret the entry.
+fn relative_path(base: &Path, path: &Path) -> Result<PathBuf, FsError> {
+    #[cfg(unix)]
+    if !path.is_absolute() {
+        return Ok(if path.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            path.to_owned()
+        });
+    }
+    #[cfg(windows)]
+    let host_path = std::path::absolute(dunce::simplified(base).join(path))?;
+    #[cfg(unix)]
+    let host_path = path.to_owned();
+    let resolved = if cfg!(unix) && host_path.starts_with(base) {
+        host_path
+    } else if dunce::simplified(&host_path) == dunce::simplified(base) {
+        base.to_owned()
+    } else if let Some(name) = host_path.file_name() {
+        let parent = host_path.parent().ok_or(FsError::Denied)?;
+        fs::canonicalize(parent)?.join(name)
+    } else {
+        // A terminal `..` names a directory, not a removable entry.
+        fs::canonicalize(&host_path)?
+    };
+    let relative = resolved
+        .strip_prefix(base)
+        .map_err(|_| FsError::Denied)?
+        .to_path_buf();
+    #[cfg(unix)]
+    let relative = {
+        let mut relative = relative;
+        if relative.as_os_str().is_empty() {
+            relative.push(".");
+        } else if entry_before_directory_suffix(path).is_some() {
+            // strip_prefix discards directory suffixes. Preserve traversal and
+            // a final dot (even in /./), which rmdir must not turn into deletion.
+            let trailing_dot = path
+                .as_os_str()
+                .as_encoded_bytes()
+                .rsplit(|byte| *byte == b'/')
+                .find(|component| !component.is_empty())
+                .is_some_and(|component| component == b".");
+            relative.push(if trailing_dot { "." } else { "" });
+        }
+        relative
+    };
+    Ok(relative)
+}
+
+/// Engine-neutral filesystem operations that enforce the runtime policy
+/// before accessing the operating system's filesystem.
+pub(crate) struct HostFs {
+    policy: Option<FsPolicy>,
+    environment: Arc<Env>,
+    working_directory: Arc<WorkingDirectory>,
+}
+
+impl HostFs {
+    pub(crate) fn resolve_path(&self, path: &OsStr) -> OsString {
+        self.working_directory.resolve_path(path)
+    }
+
+    pub(crate) fn new(
+        policy: Option<FsPolicy>,
+        environment: Arc<Env>,
+        working_directory: Arc<WorkingDirectory>,
+    ) -> Self {
+        Self {
+            policy,
+            environment,
+            working_directory,
+        }
+    }
+
+    pub(crate) fn temp_dir(&self) -> Result<OsString, FsError> {
+        // Native Windows selection has fallbacks beyond TMP and TEMP. Preserve
+        // those only for Ambient; an owned Env must never consult process state.
+        if self.environment.is_ambient() {
+            return stub::get_tmp_path().map_err(Into::into);
+        }
+        #[cfg(unix)]
+        {
+            stub::get_tmp_path_from_env(self.environment.get("TMPDIR".as_ref())).map_err(Into::into)
+        }
+        #[cfg(windows)]
+        {
+            stub::get_tmp_path_from_env(
+                self.environment.get("TMP".as_ref()),
+                self.environment.get("TEMP".as_ref()),
+            )
+            .map_err(Into::into)
+        }
+    }
+
+    pub(crate) fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        self.authorize_read(path.as_os_str())?;
+        Ok(fs::read(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn read_text(&self, path: &Path) -> Result<String, FsError> {
+        self.authorize_read(path.as_os_str())?;
+        Ok(fs::read_to_string(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn write_file(&self, path: &Path, contents: &[u8]) -> Result<(), FsError> {
+        self.authorize_write(path.as_os_str())?;
+        Ok(fs::write(self.resolve_path(path.as_os_str()), contents)?)
+    }
+
+    pub(crate) fn write_file_with<E>(
+        &self,
+        path: &Path,
+        contents: impl FnOnce() -> Result<Vec<u8>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<FsError>,
+    {
+        // Authorize before decoding an untrusted payload. Decode before opening
+        // the target so a conversion failure cannot create or truncate a file.
+        self.authorize_write(path.as_os_str())?;
+        fs::write(self.resolve_path(path.as_os_str()), contents()?)
+            .map_err(|error| FsError::Io(error).into())
+    }
+
+    pub(crate) fn create_directory_all(&self, path: &Path) -> Result<(), FsError> {
+        self.authorize_write(path.as_os_str())?;
+        Ok(fs::create_dir_all(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn remove_directory_all(&self, path: &Path) -> Result<(), FsError> {
+        self.authorize_remove(path.as_os_str())?;
+        Ok(fs::remove_dir_all(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn current_directory(&self) -> Result<PathBuf, FsError> {
+        self.authorize_read(OsStr::new("."))?;
+        Ok(self.working_directory.current_dir()?)
+    }
+
+    pub(crate) fn open_file_at(
+        &self,
+        directory: &Directory,
+        path: &Path,
+        options: FileOpenOptions,
+    ) -> Result<fs::File, FsError> {
+        use super::os::{
+            DirectIo,
+            openat::{self, Access, CreateMode, OpenOptions, Sync, TypeConstraint},
+        };
+        let base = directory.path()?;
+        let path = relative_path(&base, path)?;
+        self.authorize_path_at(
+            Some(&base),
+            path.as_os_str(),
+            FsIntents::new(
+                options.read,
+                options.write
+                    || options.append
+                    || options.create
+                    || options.create_new
+                    || options.truncate,
+            ),
+        )?;
+        let write = options.write || options.append;
+        // Preserve std::OpenOptions validation before reaching a destructive
+        // native open. Native async jobs have their own scalar-option contract.
+        if (!write && (!options.read || options.create || options.create_new || options.truncate))
+            || (options.append && options.truncate && !options.create_new)
+        {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput).into());
+        }
+        Ok(openat::open(
+            Some(super::os::raw_file(&directory.file)),
+            path.as_os_str(),
+            &OpenOptions {
+                access: if options.read && write {
+                    Access::ReadWrite
+                } else if write {
+                    Access::Write
+                } else {
+                    Access::Read
+                },
+                type_constraint: TypeConstraint::Any,
+                follow_symlink: true,
+                is_async: false,
+                create: if options.create_new {
+                    CreateMode::Exclusive
+                } else {
+                    match (options.create, options.truncate) {
+                        (false, false) => CreateMode::Open,
+                        (false, true) => CreateMode::Truncate,
+                        (true, false) => CreateMode::Create,
+                        (true, true) => CreateMode::CreateOrTruncate,
+                    }
+                },
+                append: options.append,
+                sync: Sync::None,
+                permission: 0o666,
+            },
+            &DirectIo,
+        )?)
+    }
+
+    pub(crate) fn open_directory_at(
+        &self,
+        directory: &Directory,
+        path: &Path,
+    ) -> Result<Directory, FsError> {
+        use super::os::{
+            DirectIo,
+            openat::{self, Access, CreateMode, OpenOptions, Sync, TypeConstraint},
+        };
+        let base = directory.path()?;
+        let path = relative_path(&base, path)?;
+        self.authorize_path_at(Some(&base), path.as_os_str(), FsIntents::read())?;
+        // NtCreateFile does not perform DOS dot-component normalization. The
+        // normalized path is empty when opening the acquired directory itself.
+        let file = if path.as_os_str().is_empty() {
+            directory.file.try_clone()?
+        } else {
+            openat::open(
+                Some(super::os::raw_file(&directory.file)),
+                path.as_os_str(),
+                &OpenOptions {
+                    access: Access::TraverseDirectory,
+                    type_constraint: TypeConstraint::Directory,
+                    follow_symlink: true,
+                    is_async: false,
+                    create: CreateMode::Open,
+                    append: false,
+                    sync: Sync::None,
+                    permission: 0,
+                },
+                &DirectIo,
+            )?
+        };
+        Ok(Directory { file })
+    }
+
+    pub(crate) fn metadata(&self, path: &Path) -> Result<fs::Metadata, FsError> {
+        self.authorize_read(path.as_os_str())?;
+        Ok(fs::metadata(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn read_link(&self, path: &Path) -> Result<PathBuf, FsError> {
+        self.authorize_entry_metadata(path.as_os_str())?;
+        Ok(fs::read_link(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn read_directory(&self, path: &Path) -> Result<fs::ReadDir, FsError> {
+        self.authorize_read(path.as_os_str())?;
+        Ok(fs::read_dir(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn create_directory(&self, path: &Path) -> Result<(), FsError> {
+        self.authorize_write_entry(path.as_os_str())?;
+        Ok(fs::create_dir(self.resolve_path(path.as_os_str()))?)
+    }
+
+    pub(crate) fn rename(&self, source: &Path, target: &Path) -> Result<(), FsError> {
+        self.authorize_rename(source.as_os_str(), target.as_os_str())?;
+        Ok(super::os::rename(
+            Path::new(&self.resolve_path(source.as_os_str())),
+            Path::new(&self.resolve_path(target.as_os_str())),
+            super::os::RenameOptions {
+                replace: true,
+                cross_device: super::os::CrossDevice::Reject,
+            },
+        )?)
+    }
+
+    pub(crate) fn remove_directory_at(
+        &self,
+        directory: &Directory,
+        path: &Path,
+    ) -> Result<(), FsError> {
+        let base = directory.path()?;
+        let path = relative_path(&base, path)?;
+        self.authorize_entry_at(Some(&base), path.as_os_str(), FsIntents::write())?;
+        Ok(super::os::unlinkat::remove_directory_at(
+            Some(super::os::raw_file(&directory.file)),
+            path.as_os_str(),
+            &super::os::DirectIo,
+        )?)
+    }
+
+    pub(crate) fn unlink_file_at(&self, directory: &Directory, path: &Path) -> Result<(), FsError> {
+        let base = directory.path()?;
+        let path = relative_path(&base, path)?;
+        self.authorize_entry_at(Some(&base), path.as_os_str(), FsIntents::write())?;
+        Ok(super::os::unlinkat::unlink_file_at(
+            Some(super::os::raw_file(&directory.file)),
+            path.as_os_str(),
+            &super::os::DirectIo,
+        )?)
+    }
+
+    pub(crate) fn unlink_file(&self, path: &Path) -> Result<(), FsError> {
+        self.authorize_remove(path.as_os_str())?;
+        Ok(fs::remove_file(self.resolve_path(path.as_os_str()))?)
+    }
+    pub(crate) fn authorize_open(
+        &self,
+        path: &OsStr,
+        access: i32,
+        create_mode: i32,
+    ) -> Result<(), FsError> {
+        self.authorize_path(path, FsIntents::for_open(access, create_mode))
+    }
+
+    pub(super) fn authorize_metadata(&self, path: &OsStr) -> Result<(), FsError> {
+        self.authorize_read(path)
+    }
+
+    pub(super) fn directory_path_for_policy(
+        &self,
+        handle: super::os::RawFile,
+    ) -> Result<Option<PathBuf>, FsError> {
+        // Native relative operations need no recoverable pathname. Require it
+        // only when a policy needs to authorize a fresh effect at that location.
+        self.policy
+            .as_ref()
+            .map(|_| directory_path_for_authorization(handle))
+            .transpose()
+    }
+
+    pub(super) fn authorize_path_at(
+        &self,
+        base: Option<&Path>,
+        path: &OsStr,
+        intents: FsIntents,
+    ) -> Result<(), FsError> {
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        let target = authorization_target_at(base, path);
+        let resolved = resolve_from_directory(base, Path::new(path))
+            .and_then(|path| canonicalize_existing_prefix(&path))
+            .ok();
+        policy
+            .authorize(resolved.as_deref(), intents, &target)
+            .map_err(|_| FsError::Denied)
+    }
+
+    pub(crate) fn authorize_file(
+        &self,
+        grant: &FileGrant,
+        operation: FileOperation,
+    ) -> Result<(), FsError> {
+        grant.authorize(self.policy.as_ref(), operation)
+    }
+
+    pub(crate) fn authorize_read(&self, path: &OsStr) -> Result<(), FsError> {
+        self.authorize_path(path, FsIntents::read())
+    }
+
+    pub(crate) fn authorize_write(&self, path: &OsStr) -> Result<(), FsError> {
+        self.authorize_path(path, FsIntents::write())
+    }
+
+    pub(super) fn authorize_entry_at(
+        &self,
+        base: Option<&Path>,
+        path: &OsStr,
+        intents: FsIntents,
+    ) -> Result<(), FsError> {
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        let target = authorization_target_at(base, path);
+        let resolved = resolve_from_directory(base, Path::new(path))
+            .and_then(|path| canonicalize_entry_path(&path))
+            .ok();
+        policy
+            .authorize(resolved.as_deref(), intents, &target)
+            .map_err(|_| FsError::Denied)
+    }
+
+    pub(super) fn authorize_entry_metadata(&self, path: &OsStr) -> Result<(), FsError> {
+        self.authorize_entry(path, FsIntents::read())
+    }
+
+    pub(super) fn authorize_access(&self, path: &OsStr, access: i32) -> Result<(), FsError> {
+        self.authorize_path(path, FsIntents::for_access_check(access))
+    }
+
+    pub(super) fn authorize_remove(&self, path: &OsStr) -> Result<(), FsError> {
+        self.authorize_entry(path, FsIntents::write())
+    }
+
+    pub(super) fn authorize_rename(
+        &self,
+        old_path: &OsStr,
+        new_path: &OsStr,
+    ) -> Result<(), FsError> {
+        self.authorize_entry(old_path, FsIntents::write())?;
+        self.authorize_entry(new_path, FsIntents::write())
+    }
+
+    pub(super) fn authorize_write_entry(&self, path: &OsStr) -> Result<(), FsError> {
+        self.authorize_entry(path, FsIntents::write())
+    }
+
+    fn authorize_path(&self, path: &OsStr, intents: FsIntents) -> Result<(), FsError> {
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        let target = quote_os_str(path);
+        let resolved = self
+            .working_directory
+            .resolve_absolute(Path::new(path))
+            .ok()
+            .and_then(|path| canonicalize_existing_prefix(&path).ok());
+        policy
+            .authorize(resolved.as_deref(), intents, &target)
+            .map_err(|_| FsError::Denied)
+    }
+
+    fn authorize_entry(&self, path: &OsStr, intents: FsIntents) -> Result<(), FsError> {
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        let target = quote_os_str(path);
+        let resolved = self
+            .working_directory
+            .resolve_absolute(Path::new(path))
+            .ok()
+            .and_then(|path| canonicalize_entry_path(&path).ok());
+        policy
+            .authorize(resolved.as_deref(), intents, &target)
+            .map_err(|_| FsError::Denied)
+    }
+}
+
+fn resolve_from_directory(base: Option<&Path>, path: &Path) -> Result<PathBuf, FsError> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        base.map(|base| base.join(path)).ok_or(FsError::Denied)
+    }
+}
+
+pub(super) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf, FsError> {
+    for ancestor in path.ancestors() {
+        match crate::os::fs::canonicalize(ancestor) {
+            Ok(prefix) => {
+                let suffix = path.strip_prefix(ancestor).map_err(|_| FsError::Denied)?;
+                // Lexically cancelling a missing component with `..` could
+                // hide later links that recursive creation will traverse.
+                if suffix.components().any(|part| part == Component::ParentDir) {
+                    return Err(FsError::Denied);
+                }
+                return Ok(normalize_path(prefix.join(suffix)));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(FsError::Denied),
+        }
+        // Only missing entries may use prefix fallback. An unresolved existing
+        // link can redirect creation outside the authorized prefix. Strip a
+        // directory suffix so lstat inspects the entry rather than following it.
+        let entry: PathBuf = ancestor.components().collect();
+        match crate::os::fs::symlink_metadata(entry) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            _ => return Err(FsError::Denied),
+        }
+    }
+    Err(FsError::Denied)
+}
+
+/// A Unix directory suffix makes the named component participate in directory
+/// traversal, even for an operation normally acting on the final link entry.
+/// Inspect the original bytes: Path::file_name deliberately ignores this suffix.
+/// The returned path is only for inspection; native operations retain `path`.
+pub(crate) fn entry_before_directory_suffix(path: &Path) -> Option<PathBuf> {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    if cfg!(unix) && (bytes.ends_with(b"/") || bytes.ends_with(b"/.")) {
+        Some(path.parent()?.join(path.file_name()?))
+    } else {
+        None
+    }
+}
+
+fn canonicalize_entry_path(path: &Path) -> Result<PathBuf, FsError> {
+    if let Some(entry) = entry_before_directory_suffix(path) {
+        if let Ok(resolved) = crate::os::fs::canonicalize(path) {
+            return Ok(resolved);
+        }
+        // A dangling link is not a missing directory entry. Prefix fallback
+        // would authorize the link's name while mkdir/rename may create its target.
+        if crate::os::fs::symlink_metadata(entry).is_ok_and(|metadata| metadata.is_symlink()) {
+            return Err(FsError::Denied);
+        }
+        return canonicalize_existing_prefix(path);
+    }
+    let parent = path.parent().ok_or(FsError::Denied)?;
+    let file_name = path.file_name().ok_or(FsError::Denied)?;
+    Ok(normalize_path(
+        canonicalize_existing_prefix(parent)?.join(file_name),
+    ))
+}
+
+fn normalize_path(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
+
+fn quote_os_str(value: &OsStr) -> String {
+    format!("{:?}", value.to_string_lossy())
+}
+
+fn authorization_target_at(base: Option<&Path>, path: &OsStr) -> String {
+    base.map_or_else(
+        || quote_os_str(OsStr::new("<untracked resource>")),
+        |_| quote_os_str(path),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::{self, Policy};
+
+    fn host_fs(policy: Option<Policy>, environment: Arc<Env>) -> HostFs {
+        HostFs::new(
+            policy.as_ref().map(Policy::filesystem),
+            environment,
+            Arc::new(WorkingDirectory::Ambient),
+        )
+    }
+
+    #[test]
+    fn ambient_temp_dir_uses_native_path() {
+        let host = host_fs(None, Arc::new(Env::ambient()));
+
+        assert_eq!(host.temp_dir().unwrap(), stub::get_tmp_path().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owned_temp_dir_uses_runtime_environment() {
+        use crate::os::unix::ffi::OsStrExt;
+
+        let environment = Arc::new(Env::owned([("TMPDIR".into(), "/runtime/tmp".into())]).unwrap());
+        let host = host_fs(None, environment);
+
+        assert_eq!(host.temp_dir().unwrap().as_bytes(), b"/runtime/tmp/");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temp_dir_reflects_runtime_environment_changes() {
+        use crate::os::unix::ffi::OsStrExt;
+
+        let environment = Arc::new(Env::owned([("TMPDIR".into(), "/first".into())]).unwrap());
+        let host = host_fs(None, Arc::clone(&environment));
+
+        assert_eq!(host.temp_dir().unwrap().as_bytes(), b"/first/");
+        environment.set("TMPDIR".into(), "/second".into()).unwrap();
+        assert_eq!(host.temp_dir().unwrap().as_bytes(), b"/second/");
+        environment.unset("TMPDIR".as_ref()).unwrap();
+        assert_eq!(
+            host.temp_dir().unwrap(),
+            stub::get_tmp_path_from_env(None).unwrap()
+        );
+    }
+
+    #[cfg(all(unix, not(target_os = "android")))]
+    #[test]
+    fn empty_owned_environment_uses_default_temp_dir() {
+        use crate::os::unix::ffi::OsStrExt;
+
+        let environment = Arc::new(Env::owned(Vec::<(OsString, OsString)>::new()).unwrap());
+        let host = host_fs(None, environment);
+
+        assert_eq!(host.temp_dir().unwrap().as_bytes(), b"/tmp/");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn owned_temp_dir_requires_configured_windows_environment() {
+        let environment = Arc::new(Env::owned(Vec::<(OsString, OsString)>::new()).unwrap());
+        let host = host_fs(None, Arc::clone(&environment));
+
+        assert!(matches!(host.temp_dir(), Err(FsError::Denied)));
+        environment.set("TEMP".into(), "C:/Temp".into()).unwrap();
+        assert_eq!(host.temp_dir().unwrap().to_string_lossy(), "C:/Temp\\");
+        environment.unset("TEMP".as_ref()).unwrap();
+        assert!(matches!(host.temp_dir(), Err(FsError::Denied)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn empty_tmp_falls_back_to_temp() {
+        let environment = Arc::new(
+            Env::owned([
+                ("TMP".into(), "".into()),
+                ("TEMP".into(), "C:/Fallback".into()),
+            ])
+            .unwrap(),
+        );
+        let host = host_fs(None, environment);
+
+        assert_eq!(host.temp_dir().unwrap().to_string_lossy(), "C:/Fallback\\");
+    }
+
+    #[test]
+    fn relative_at_authorization_uses_the_open_directory_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        crate::os::fs::create_dir(&allowed).unwrap();
+        crate::os::fs::write(allowed.join("input.txt"), "input").unwrap();
+        let policy_file = tmp.path().join("policy.toml");
+        crate::os::fs::write(&policy_file, "[fs]\nread = [\"allowed\"]\n").unwrap();
+        let (policy, _) = policy::load_file(&policy_file).unwrap();
+        let host = host_fs(Some(policy), Arc::new(Env::ambient()));
+
+        host.authorize_path_at(Some(&allowed), OsStr::new("input.txt"), FsIntents::read())
+            .unwrap();
+        assert!(matches!(
+            host.authorize_path_at(None, OsStr::new("input.txt"), FsIntents::read()),
+            Err(FsError::Denied)
+        ));
+    }
+
+    #[test]
+    fn relative_at_authorization_preserves_untracked_diagnostic_target() {
+        assert_eq!(
+            authorization_target_at(None, OsStr::new("input.txt")),
+            "\"<untracked resource>\""
+        );
+        assert_eq!(
+            authorization_target_at(Some(Path::new("base")), OsStr::new("input.txt")),
+            "\"input.txt\""
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resource_authorization_rechecks_saved_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        let denied = tmp.path().join("denied");
+        crate::os::fs::create_dir(&allowed).unwrap();
+        crate::os::fs::create_dir(&denied).unwrap();
+        let resource_path = allowed.join("resource.txt");
+        let denied_file = denied.join("target.txt");
+        crate::os::fs::write(&resource_path, "allowed").unwrap();
+        crate::os::fs::write(&denied_file, "denied").unwrap();
+        let grant = FileGrant::from_opened_path(Some(resource_path.clone()));
+        let policy_file = tmp.path().join("policy.toml");
+        crate::os::fs::write(
+            &policy_file,
+            "[fs]\nread = [\"allowed\"]\nwrite = [\"allowed\"]\n",
+        )
+        .unwrap();
+        let (policy, _) = policy::load_file(&policy_file).unwrap();
+        let host = host_fs(Some(policy), Arc::new(Env::ambient()));
+
+        crate::os::fs::remove_file(&resource_path).unwrap();
+        crate::os::unix::fs::symlink(&denied_file, &resource_path).unwrap();
+
+        let metadata = host.authorize_file(&grant, FileOperation::Metadata);
+        let lock = host.authorize_file(&grant, FileOperation::Lock { exclusive: true });
+        assert!(matches!(metadata, Err(FsError::Denied)));
+        assert!(matches!(lock, Err(FsError::Denied)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creation_policy_does_not_walk_past_unresolved_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        let denied = tmp.path().join("denied");
+        crate::os::fs::create_dir(&allowed).unwrap();
+        crate::os::fs::create_dir(&denied).unwrap();
+        let link = allowed.join("link");
+        crate::os::unix::fs::symlink("../denied/missing", &link).unwrap();
+        let policy_file = tmp.path().join("policy.toml");
+        crate::os::fs::write(&policy_file, "[fs]\nwrite = [\"allowed\"]\n").unwrap();
+        let (policy, _) = policy::load_file(&policy_file).unwrap();
+        let host = host_fs(Some(policy), Arc::new(Env::ambient()));
+
+        assert!(matches!(
+            host.write_file(&link, b"escape"),
+            Err(FsError::Denied)
+        ));
+        let directory = Directory::preopen(&allowed).unwrap();
+        assert!(matches!(
+            host.open_file_at(
+                &directory,
+                Path::new("link"),
+                FileOpenOptions {
+                    read: false,
+                    write: true,
+                    append: false,
+                    create: true,
+                    create_new: false,
+                    truncate: false,
+                }
+            ),
+            Err(FsError::Denied)
+        ));
+        // Walking past a missing descendant must still inspect its link ancestor.
+        assert!(matches!(
+            host.create_directory_all(&link.join("child")),
+            Err(FsError::Denied)
+        ));
+        for path in ["link/", "link/.", "new/../link/child"] {
+            assert!(matches!(
+                host.create_directory_all(&allowed.join(path)),
+                Err(FsError::Denied)
+            ));
+        }
+        assert!(!denied.join("missing").exists());
+        assert!(!allowed.join("new").exists());
+
+        crate::os::unix::fs::symlink("loop", allowed.join("loop")).unwrap();
+        assert!(matches!(
+            host.authorize_write(allowed.join("loop").as_os_str()),
+            Err(FsError::Denied)
+        ));
+        host.unlink_file(&allowed.join("loop")).unwrap();
+
+        host.create_directory_all(&allowed.join("new/child"))
+            .unwrap();
+        host.write_file(&allowed.join("new/file"), b"allowed")
+            .unwrap();
+        let renamed = allowed.join("renamed");
+        host.rename(&link, &renamed).unwrap();
+        assert_eq!(
+            crate::os::fs::read_link(&renamed).unwrap(),
+            Path::new("../denied/missing")
+        );
+        host.unlink_file(&renamed).unwrap();
+        assert!(crate::os::fs::symlink_metadata(renamed).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unrestricted_creation_keeps_native_dangling_link_behavior() {
+        let tmp = tempfile::tempdir().unwrap();
+        let link = tmp.path().join("link");
+        crate::os::unix::fs::symlink("missing", &link).unwrap();
+        let host = host_fs(None, Arc::new(Env::ambient()));
+
+        host.write_file(&link, b"native").unwrap();
+        assert_eq!(
+            crate::os::fs::read(tmp.path().join("missing")).unwrap(),
+            b"native"
+        );
+        assert!(crate::os::fs::symlink_metadata(link).unwrap().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_suffix_policy_rejects_dangling_links_but_allows_new_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        let denied = tmp.path().join("denied");
+        crate::os::fs::create_dir(&allowed).unwrap();
+        crate::os::fs::create_dir(&denied).unwrap();
+        crate::os::unix::fs::symlink("../denied/new", allowed.join("link")).unwrap();
+        let policy_file = tmp.path().join("policy.toml");
+        crate::os::fs::write(&policy_file, "[fs]\nwrite = [\"allowed\"]\n").unwrap();
+        let (policy, _) = policy::load_file(&policy_file).unwrap();
+        let host = host_fs(Some(policy), Arc::new(Env::ambient()));
+        let link = allowed.join("link/");
+        assert!(matches!(host.create_directory(&link), Err(FsError::Denied)));
+        let source = allowed.join("source");
+        crate::os::fs::create_dir(&source).unwrap();
+        assert!(matches!(host.rename(&source, &link), Err(FsError::Denied)));
+        assert!(source.is_dir());
+        assert!(!denied.join("new").exists());
+
+        host.create_directory(&allowed.join("new/")).unwrap();
+        host.rename(&source, &allowed.join("new/")).unwrap();
+        assert!(!source.exists());
+        assert!(allowed.join("new").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_policy_checks_link_path_not_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        let denied = tmp.path().join("denied");
+        crate::os::fs::create_dir(&allowed).unwrap();
+        crate::os::fs::create_dir(&denied).unwrap();
+        let allowed_file = allowed.join("target.txt");
+        let denied_link = denied.join("link.txt");
+        crate::os::fs::write(&allowed_file, "target").unwrap();
+        crate::os::unix::fs::symlink(&allowed_file, &denied_link).unwrap();
+        let policy_file = tmp.path().join("policy.toml");
+        crate::os::fs::write(&policy_file, "[fs]\nwrite = [\"allowed\"]\n").unwrap();
+        let (policy, _) = policy::load_file(&policy_file).unwrap();
+        let host = host_fs(Some(policy), Arc::new(Env::ambient()));
+
+        assert!(matches!(
+            host.authorize_remove(denied_link.as_os_str()),
+            Err(FsError::Denied)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_policy_checks_link_entry_not_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let allowed = tmp.path().join("allowed");
+        let denied = tmp.path().join("denied");
+        crate::os::fs::create_dir(&allowed).unwrap();
+        crate::os::fs::create_dir(&denied).unwrap();
+        let denied_file = denied.join("target.txt");
+        let allowed_link = allowed.join("link.txt");
+        crate::os::fs::write(&denied_file, "target").unwrap();
+        crate::os::unix::fs::symlink(&denied_file, &allowed_link).unwrap();
+        let policy_file = tmp.path().join("policy.toml");
+        crate::os::fs::write(&policy_file, "[fs]\nwrite = [\"allowed\"]\n").unwrap();
+        let (policy, _) = policy::load_file(&policy_file).unwrap();
+        let host = host_fs(Some(policy), Arc::new(Env::ambient()));
+
+        host.authorize_remove(allowed_link.as_os_str()).unwrap();
+        assert!(matches!(
+            host.authorize_write(allowed_link.as_os_str()),
+            Err(FsError::Denied)
+        ));
+    }
+}

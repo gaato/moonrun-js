@@ -9,6 +9,7 @@ description = "The part of moon's moonutil crate that moonrun uses (verbatim fil
 [features]
 front_matter = ["dep:anyhow", "dep:serde", "dep:serde_yaml", "dep:indexmap", "dep:regex", "dep:logos", "dep:serde_json_lenient"]
 policy_transport = []
+wasm_source_map = []
 
 [dependencies]
 os = { path = "../os" }

@@ -63,9 +63,9 @@ jobs:
           echo "$toolchain/bin" >> "$GITHUB_PATH"
           echo "MOONRUN_REFERENCE=$toolchain/bin/moonrun" >> "$GITHUB_ENV"
       - run: mise exec -- pnpm install --frozen-lockfile
-      - run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm --runtime ${{ matrix.runtime }}
+      - run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm --unordered --runtime ${{ matrix.runtime }}
       - if: always() && !cancelled()
-        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm-gc --runtime ${{ matrix.runtime }}
+        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm-gc --unordered --runtime ${{ matrix.runtime }}
       - if: always() && !cancelled()
         run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts async --target wasm --unordered --runtime ${{ matrix.runtime }}
       - if: always() && !cancelled()

@@ -151,6 +151,7 @@ export async function run(
       policy ??= ambientPolicy(host);
       return policy;
     },
+    enforcedPolicy: loadedPolicy?.enforced === true ? loadedPolicy : undefined,
     moduleName: loaded.name,
     args: options.args,
     onCompleted: (check) => {
@@ -186,7 +187,7 @@ export async function run(
     const message = `moonrun Runtime leaked host state: ${leaks.join(', ')}`;
     stdio.flushStdout();
     stdio.writeStderrText(
-      `\nthread 'main' (${host.platform.pid}) panicked at crates/moonrun/src/runtime/mod.rs:271:13:\n${message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace\n`,
+      `\nthread 'main' (${host.platform.pid}) panicked at crates/moonrun/src/runtime/mod.rs:349:13:\n${message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace\n`,
     );
     return { kind: 'panicked', message };
   };
@@ -279,6 +280,16 @@ export async function run(
       const finishDriver = exportedFunction(exports, 'moonbit_test_driver_finish');
       if (finishDriver === undefined) {
         return hostFailure('test module does not export `moonbit_test_driver_finish`');
+      }
+      // Tests call exports directly, so moonrun initializes once first: a WASI reactor's
+      // `_initialize`, else a test executable's `_start`; older modules have neither.
+      const initialize =
+        exportedFunction(exports, '_initialize') ?? exportedFunction(exports, '_start');
+      if (initialize !== undefined) {
+        const outcome = await call(initialize, []);
+        if (outcome.kind !== 'returned') {
+          return finish(outcome, 'failed to initialize the MoonBit test driver');
+        }
       }
       for (const [file, ranges] of options.testArgs.file_and_index) {
         for (const { start, end } of ranges) {

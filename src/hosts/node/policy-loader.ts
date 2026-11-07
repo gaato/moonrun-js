@@ -125,11 +125,15 @@ export function loadRunPolicy(
     module.value,
     osCapabilities(host, (bytes) => host.stdio.writeStderr(bytes)),
   );
-  const loaded =
-    inherited.value !== undefined
-      ? policy.loadInherited(inherited.value)
-      : policy.loadFile(request.policyPath ?? '', request.sourceDir);
-  return loaded.ok ? ok(policy) : loaded;
+  // moonrun: the selected file is read first, then composed under the inherited ceiling.
+  if (request.policyPath !== undefined) {
+    const selected = policy.select(request.policyPath, request.sourceDir);
+    if (!selected.ok) {
+      return selected;
+    }
+  }
+  const realized = policy.realize(inherited.value);
+  return realized.ok ? ok(policy) : realized;
 }
 
 /**

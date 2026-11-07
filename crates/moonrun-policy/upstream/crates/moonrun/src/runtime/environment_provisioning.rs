@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/runtime/environment_provisioning.rs (rewrites: std-env ×2)
+// upstream: moonbitlang/moon@940aa18df6db921386e87e16fa94b84fa267864b crates/moonrun/src/runtime/environment_provisioning.rs (rewrites: none)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -26,6 +26,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 
 use super::Env;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EnvConfig {
+    #[serde(default)]
+    pub(crate) from_host: Vec<String>,
+    #[serde(default)]
+    pub(crate) required_from_host: Vec<String>,
+    #[serde(default)]
+    pub(crate) set: BTreeMap<String, String>,
+}
+
+impl EnvConfig {
+    pub(crate) fn provision(self, source: &Env) -> anyhow::Result<Env> {
+        EnvProvisioning::new(self.from_host, self.required_from_host, self.set, source)?.realize()
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct EnvProvisioning {
@@ -37,16 +55,17 @@ impl EnvProvisioning {
         from_host: Vec<String>,
         required_from_host: Vec<String>,
         set: BTreeMap<String, String>,
+        source: &Env,
     ) -> anyhow::Result<Self> {
         let mut vars = Vec::new();
 
         let copy_all = from_host.iter().any(|name| name == "*");
         if copy_all {
-            vars.extend(crate::os::env::vars_os());
+            vars.extend(source.entries());
         }
 
-        copy_host_names(&mut vars, &from_host, false)?;
-        copy_host_names(&mut vars, &required_from_host, true)?;
+        copy_host_names(&mut vars, &from_host, false, source)?;
+        copy_host_names(&mut vars, &required_from_host, true, source)?;
 
         for (name, value) in set {
             vars.push((name.into(), value.into()));
@@ -67,6 +86,7 @@ fn copy_host_names(
     vars: &mut Vec<(OsString, OsString)>,
     names: &[String],
     required: bool,
+    source: &Env,
 ) -> anyhow::Result<()> {
     let mut seen = BTreeSet::new();
     for name in names {
@@ -76,7 +96,7 @@ fn copy_host_names(
         if !seen.insert(name) {
             anyhow::bail!("duplicate environment policy entry {name:?}");
         }
-        match crate::os::env::var_os(name) {
+        match source.get(name.as_ref()) {
             Some(value) => {
                 vars.push((name.into(), value));
             }
@@ -94,8 +114,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provisioning_reads_only_the_supplied_environment() {
+        let source = Env::owned(vec![("CHILD_ONLY".into(), "value".into())]).unwrap();
+        for from_host in [vec!["*".into()], vec!["CHILD_ONLY".into()]] {
+            let environment = EnvProvisioning::new(
+                from_host,
+                vec!["CHILD_ONLY".into()],
+                BTreeMap::new(),
+                &source,
+            )
+            .unwrap()
+            .realize()
+            .unwrap();
+            assert_eq!(environment.entries(), source.entries());
+        }
+    }
+
+    #[test]
     fn empty_provisioning_starts_empty() {
-        let provisioning = EnvProvisioning::new(Vec::new(), Vec::new(), BTreeMap::new()).unwrap();
+        let provisioning = EnvProvisioning::new(
+            Vec::new(),
+            Vec::new(),
+            BTreeMap::new(),
+            &crate::runtime::Env::ambient(),
+        )
+        .unwrap();
 
         assert!(provisioning.realize().unwrap().entries().is_empty());
     }
@@ -106,6 +149,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             BTreeMap::from([("APP_ENV".to_owned(), "test".to_owned())]),
+            &crate::runtime::Env::ambient(),
         )
         .unwrap();
         let environment = provisioning.realize().unwrap();
@@ -126,6 +170,7 @@ mod tests {
                 ("B".to_owned(), "2".to_owned()),
                 ("A".to_owned(), "1".to_owned()),
             ]),
+            &crate::runtime::Env::ambient(),
         )
         .unwrap();
 
@@ -141,6 +186,7 @@ mod tests {
             vec!["APP_ENV".to_owned(), "APP_ENV".to_owned()],
             Vec::new(),
             BTreeMap::new(),
+            &crate::runtime::Env::ambient(),
         )
         .unwrap_err();
 
@@ -157,6 +203,7 @@ mod tests {
             Vec::new(),
             vec!["MOONRUN_ENV_POLICY_TEST_MISSING".to_owned()],
             BTreeMap::new(),
+            &crate::runtime::Env::ambient(),
         )
         .unwrap_err();
 

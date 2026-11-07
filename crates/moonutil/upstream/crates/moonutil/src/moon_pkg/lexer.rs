@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonutil/src/moon_pkg/lexer.rs (rewrites: none)
+// upstream: moonbitlang/moon@940aa18df6db921386e87e16fa94b84fa267864b crates/moonutil/src/moon_pkg/lexer.rs (rewrites: none)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //

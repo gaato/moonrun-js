@@ -32,6 +32,11 @@ interface FileEntry {
   rewrites: Record<string, number>;
   /** Only this item is compiled; the rest of the file is not scanned. */
   readonly compiledItem?: string;
+  /**
+   * Trimmed lines the OS-call scan matches but that reach no OS (e.g. a method of a
+   * value that already came from `crate::os`): line -> reason. Unused entries fail.
+   */
+  readonly osCallExceptions?: Record<string, string>;
 }
 interface Manifest {
   readonly rewrites: Record<string, Rule>;
@@ -89,13 +94,24 @@ for (const entry of manifest.files) {
     }
   }
   if (entry.compiledItem === undefined) {
+    const exceptions = new Set(Object.keys(entry.osCallExceptions ?? {}));
+    const used = new Set<string>();
     nonTest(text)
       .split('\n')
       .forEach((line, i) => {
         if (!line.trimStart().startsWith('//') && OS_CALLS.test(line)) {
+          if (exceptions.has(line.trim())) {
+            used.add(line.trim());
+            return;
+          }
           problems.push(`${entry.path}:${i + 1}: OS call not covered by a rewrite: ${line.trim()}`);
         }
       });
+    for (const line of exceptions) {
+      if (!used.has(line)) {
+        problems.push(`${entry.path}: OS-call exception no longer matches: ${line}`);
+      }
+    }
   } else if (!original.includes(entry.compiledItem)) {
     problems.push(`${entry.path}: \`${entry.compiledItem}\` not found`);
   }

@@ -18,6 +18,7 @@ export const WasiErrno = {
   NOTEMPTY: 55,
   NOTSUP: 58,
   PIPE: 64,
+  XDEV: 75,
   NOTCAPABLE: 76,
 } as const;
 
@@ -40,7 +41,7 @@ export function fail(errno: WasiErrno): never {
 
 /**
  * moonrun's `io_error_to_errno`, which goes through Rust's `ErrorKind`: only these
- * kinds are mapped and every other OS error (ELOOP, ENAMETOOLONG, EXDEV, ...) is IO.
+ * kinds are mapped and every other OS error (ELOOP, ENAMETOOLONG, ...) is IO.
  */
 export function fromHostError(error: HostError): WasiErrno {
   switch (error.code) {
@@ -63,6 +64,8 @@ export function fromHostError(error: HostError): WasiErrno {
       return WasiErrno.AGAIN;
     case 'EPIPE':
       return WasiErrno.PIPE;
+    case 'EXDEV':
+      return WasiErrno.XDEV;
     default:
       return WasiErrno.IO;
   }

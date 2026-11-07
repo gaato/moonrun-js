@@ -98,7 +98,8 @@ pub extern "C" fn diag_result_len() -> usize {
     RESULT.with(|result| result.borrow().len())
 }
 
-/// `source_map::load(wasm_path, wasm)`. Returns a map id, 0 when there is none.
+/// moon `Engine::load_file`'s map: `moonutil::wasm_source_map::load(wasm_path, wasm)`
+/// parsed by `SourceMap::parse`. Returns a map id, 0 when there is none.
 ///
 /// # Safety
 /// The arguments must be buffers from `diag_alloc`.
@@ -110,7 +111,9 @@ pub unsafe extern "C" fn diag_source_map_load(
     wasm_len: usize,
 ) -> u32 {
     let path = os::unix::ffi::OsStrExt::from_bytes(unsafe { input(path, path_len) });
-    match source_map::load(Path::new::<std::ffi::OsStr>(path), unsafe { input(wasm, wasm_len) }) {
+    match moonutil::wasm_source_map::load(Path::new::<std::ffi::OsStr>(path), unsafe { input(wasm, wasm_len) })
+        .and_then(|value| source_map::SourceMap::parse(&value))
+    {
         Some(map) => MAPS.with(|maps| maps.borrow_mut().insert(map)),
         None => 0,
     }

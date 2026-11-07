@@ -7,6 +7,10 @@ pub(crate) use ::os;
 #[path = "../upstream/crates/moonutil/src/demangle.rs"]
 pub mod demangle;
 
+#[cfg(feature = "wasm_source_map")]
+#[path = "../upstream/crates/moonutil/src/wasm_source_map.rs"]
+pub mod wasm_source_map;
+
 #[cfg(feature = "front_matter")]
 #[path = "../upstream/crates/moonutil/src/front_matter.rs"]
 pub mod front_matter;

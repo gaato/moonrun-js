@@ -216,7 +216,27 @@ pub mod fs {
         stat_kind(path.as_ref(), false)
     }
 
-    pub fn read_dir<P: AsRef<Path>>(path: P) -> io::Result<std::vec::IntoIter<io::Result<DirEntry>>> {
+    /// `std::fs::ReadDir`: the entries, read eagerly.
+    pub type ReadDir = std::vec::IntoIter<io::Result<DirEntry>>;
+
+    /// `std::fs::File` as upstream's handle-relative operations hold it. This layer has
+    /// no OS handles, so none is ever constructed (`filesystem/os` stub opens nothing).
+    #[derive(Debug)]
+    pub struct File(());
+
+    impl File {
+        pub fn try_clone(&self) -> io::Result<File> {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+    }
+
+    /// No host import reads links; upstream reaches this only from HostFs::read_link,
+    /// which no ABI of this component calls.
+    pub fn read_link<P: AsRef<Path>>(_path: P) -> io::Result<PathBuf> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
+    pub fn read_dir<P: AsRef<Path>>(path: P) -> io::Result<ReadDir> {
         let base = path.as_ref();
         let names = path_call(base, super::read_dir)?;
         Ok(names

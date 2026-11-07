@@ -19,7 +19,7 @@ wee8 = []
 
 [dependencies]
 os = { path = "../os" }
-moonutil = { path = "../moonutil" }
+moonutil = { path = "../moonutil", features = ["wasm_source_map"] }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

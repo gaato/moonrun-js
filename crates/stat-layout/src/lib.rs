@@ -56,6 +56,12 @@ mod filesystem {
 
         use stat::{PackedStat, StatRequest, StatTimestamp, StatValues};
 
+        /// job/mod.rs's errno reader, which stat.rs's syscall paths name; stat_pack
+        /// makes no syscall, so it is never reached.
+        fn last_native_error() -> crate::async_host::AsyncHostError {
+            crate::async_host::AsyncHostError::Io
+        }
+
         /// `PackedStat::new(StatRequest::new(mask, capacity)?, values)`. `values` are 12 i64:
         /// kind, size, device, inode, then (seconds, nanoseconds) for access, modify, change,
         /// create; bit i of `present` says whether property i is known. Returns the encoded

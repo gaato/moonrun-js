@@ -277,6 +277,7 @@ for (const [k, r] of ref) {
     j.stdout,
     expected.filter((entry) => entry.invocation === invocation),
     target,
+    { reference: r.stderr, actual: j.stderr },
   );
   for (const entry of accepted.matched) matched.add(entry);
   const sameText = (a: string, b: string): boolean =>
@@ -296,7 +297,8 @@ for (const [k, r] of ref) {
       const difference = { argv: r.argv, field, detail };
       mismatches.push(difference);
       if (field !== 'stdout') {
-        unexpected.push(difference);
+        // A matched D16 entry may record exactly this stderr (stderrReports).
+        if (!(field === 'stderr' && accepted.stderrMatched)) unexpected.push(difference);
       } else if (!sameText(r.stdout, accepted.stdout)) {
         // Name the tests that remain after the expected differences were accepted.
         const records = recordDifferences(r.stdout, accepted.stdout);

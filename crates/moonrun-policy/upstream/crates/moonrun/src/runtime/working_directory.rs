@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/runtime/working_directory.rs (rewrites: std-env ×4)
+// upstream: moonbitlang/moon@940aa18df6db921386e87e16fa94b84fa267864b crates/moonrun/src/runtime/working_directory.rs (rewrites: std-env ×4)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -35,8 +35,9 @@ use std::path::{Path, PathBuf};
 /// Selects how one run observes and inherits a working directory.
 ///
 /// `Ambient` preserves moonrun's historical behavior: operations observe or
-/// inherit the process current directory at the same points in execution as
-/// they did before this abstraction was introduced.
+/// inherit the process current directory when they execute. HostProcess only
+/// captures a pathname when it needs to interpret virtualized lookup inputs;
+/// fully ambient spawn can inherit the underlying directory directly.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WorkingDirectory {
@@ -72,16 +73,6 @@ impl WorkingDirectory {
         }
         crate::os::env::current_dir().map(|current_dir| current_dir.join(path))
     }
-
-    pub(crate) fn configure_child_cwd(&self, cwd: &mut Option<OsString>) {
-        match self {
-            Self::Ambient => {}
-            Self::Fixed(root) => match cwd {
-                Some(path) => *path = self.resolve_path(path),
-                None => *cwd = Some(root.clone().into_os_string()),
-            },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -114,16 +105,5 @@ mod tests {
             WorkingDirectory::Ambient.resolve_absolute(&path).unwrap(),
             path
         );
-    }
-
-    #[test]
-    fn ambient_does_not_override_child_cwd_behavior() {
-        let mut inherited = None;
-        WorkingDirectory::Ambient.configure_child_cwd(&mut inherited);
-        assert_eq!(inherited, None);
-
-        let mut cwd = Some(OsString::from("relative/child"));
-        WorkingDirectory::Ambient.configure_child_cwd(&mut cwd);
-        assert_eq!(cwd, Some(OsString::from("relative/child")));
     }
 }

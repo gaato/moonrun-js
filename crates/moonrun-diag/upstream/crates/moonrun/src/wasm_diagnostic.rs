@@ -1,4 +1,4 @@
-// upstream: moonbitlang/moon@3778465a252d2838357dddf25dc0ebf3ff3ba40f crates/moonrun/src/wasm_diagnostic.rs (rewrites: std-fs ×1)
+// upstream: moonbitlang/moon@940aa18df6db921386e87e16fa94b84fa267864b crates/moonrun/src/wasm_diagnostic.rs (rewrites: none)
 // moon: The build system and package manager for MoonBit.
 // Copyright (C) 2026 International Digital Economy Academy
 //
@@ -120,14 +120,9 @@ mod tests {
     #[test]
     #[cfg(any(feature = "v8", feature = "wasmtime", feature = "wee8"))]
     fn retains_runtime_locations_alongside_source_positions() {
-        let directory = tempfile::tempdir().unwrap();
-        let wasm = directory.path().join("module.wasm");
-        crate::os::fs::write(
-            directory.path().join("module.wasm.map"),
-            r#"{"sources":["main.mbt"],"mappings":"AAAA"}"#,
-        )
-        .unwrap();
-        let source_map = crate::source_map::load(&wasm, b"").unwrap();
+        let source_map =
+            crate::source_map::SourceMap::parse(r#"{"sources":["main.mbt"],"mappings":"AAAA"}"#)
+                .unwrap();
         let diagnostic = render(
             [DiagnosticLine::Frame {
                 indentation: "    ".to_owned(),

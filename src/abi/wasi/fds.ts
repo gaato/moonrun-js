@@ -53,6 +53,8 @@ export type Descriptor =
   | (Rights & { readonly kind: 'dir'; readonly path: string });
 
 export interface ResolvedPath {
+  /** The directory descriptor's path (upstream `Directory::path`). */
+  readonly base: string;
   readonly hostPath: string;
   readonly boundaryRoot: string;
 }
@@ -64,15 +66,12 @@ export interface ResolvedPath {
 export class DescriptorTable {
   readonly #files: FilePort;
   readonly #preopenHostPath: string;
-  readonly #preopenRealPath: string;
   readonly #entries = new Map<number, Descriptor>();
   #nextFd = FD_DYNAMIC_START;
 
   constructor(files: FilePort, cwd: string | undefined) {
     this.#files = files;
     this.#preopenHostPath = cwd ?? '.';
-    const real = files.realpath(this.#preopenHostPath);
-    this.#preopenRealPath = real.ok ? real.value : this.#preopenHostPath;
   }
 
   insert(descriptor: Descriptor): number {
@@ -138,7 +137,11 @@ export class DescriptorTable {
     }
   }
 
-  /** moonrun `dir_path_for_fd`: the directory's host path, checked to still be inside the preopen. */
+  /**
+   * moonrun `directory_for_fd(...).path()`: the directory's current canonical path
+   * (upstream asks the OS for the path of its handle), checked to still be inside the
+   * preopen.
+   */
   dirPath(fd: number): string {
     let path: string;
     if (fd === FD_PREOPEN) {
@@ -147,14 +150,14 @@ export class DescriptorTable {
       const d = this.get(fd);
       path = d.kind === 'dir' ? d.path : fail(WasiErrno.BADF);
     }
-    ensureWithinRoot(this.#preopenRealPath, canonicalize(this.#files, path));
-    return path;
+    const real = canonicalize(this.#files, path);
+    ensureWithinRoot(canonicalize(this.#files, this.#preopenHostPath), real);
+    return real;
   }
 
   /** moonrun `resolve_path`: the boundary is the dirfd's own directory, not the preopen. */
   resolve(dirfd: number, path: string): ResolvedPath {
     const base = this.dirPath(dirfd);
-    const boundaryRoot = canonicalize(this.#files, this.dirPath(dirfd));
-    return { hostPath: path === '' ? base : join(base, path), boundaryRoot };
+    return { base, hostPath: path === '' ? base : join(base, path), boundaryRoot: base };
   }
 }

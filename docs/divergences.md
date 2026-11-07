@@ -6,7 +6,7 @@
 |---|---|---|
 | D1 | 匿名 wasm 関数のフレーム `wasm://wasm/<hash>` のハッシュ値が異なる | V8 のバージョン差（moonrun は rusty_v8 0.106）。MoonBit の関数は名前付きなので通常は出ない |
 | D2 | Suspending な import を使うモジュールは JSPI の副スタックで走るため、再帰の上限が本家より深い | JSPI の仕様。`--stack-size` は副スタックにも適用する |
-| D3 | Bun 1.4.2（JSC）は wasm フレームの名前・関数番号・オフセットを公開せず、`at unknown` だけを返す。ソース位置・memory-sanitizer の allocation stack を復元できない。LinkError / CompileError / RuntimeError のエンジン文言も V8 と異なる | stderr は `scripts/comparison.ts` でフレームの名前・位置だけを置換（行数・字下げは保持）。invalid wasm magic と callable import の文言だけを同義の形に揃え、import の module:name は保持する。任意のエラー文は消さない。core の例外検査と test-driver の失敗文は **stdout** にスタックを含むため、L2 にも届かない。stdout の正規化はしない。0.10.17 の core は両 target とも 93/132 invocation が完全一致し、残り 39 は D3 の厳密な fingerprint と一致。全テストの合否・exit は一致 |
+| D3 | Bun 1.4.2（JSC）は wasm フレームの名前・関数番号・オフセットを公開せず、`at unknown` だけを返す。ソース位置・memory-sanitizer の allocation stack を復元できない。LinkError / CompileError / RuntimeError のエンジン文言も V8 と異なる | stderr は `scripts/comparison.ts` でフレームの名前・位置だけを置換（行数・字下げは保持）。invalid wasm magic と callable import の文言だけを同義の形に揃え、import の module:name は保持する。任意のエラー文は消さない。core の例外検査と test-driver の失敗文は **stdout** にスタックを含むため、L2 にも届かない。stdout の正規化はしない。0.10.20 の core は wasm 142/185・wasm-gc 128/169 invocation が完全一致し、残りは D3 の厳密な fingerprint（44 invocation、両 target 計 784 records）と core/async の D16 / D33。全テストの合否・exit は D16 / D33 以外一致 |
 | D4 | WASI のパス引数（`path_open` 等）が UTF-8 として不正なバイト列のとき、U+FFFD に置き換えたパスで OS を呼ぶ（本家は Unix で生バイトのまま渡す）。`fd_readdir`・`path_readlink` が返す名前は生バイトで一致 | ホストのパスを文字列で扱うため。MoonBit の String 由来のパスは常に UTF-8 |
 | D5 | `--version` と `--help` は moonrun-js として名乗る（`moonrun-js <版> (compat moonrun …)`） | 別実装であることを隠さない。`moon version --all` は出力をそのまま表示するだけなので影響なし |
 | D6 | `wasm:js-string` builtin の中で trap したとき、本家のスタックには builtin のフレーム（例 `at fromCodePoint`）が 1 行多い | V8 のバージョン差。新しい V8 は builtin をインライン化してフレームを出さない |
@@ -54,6 +54,9 @@
 | D45 | Browser の resolver または VFS パスから得た wasm を同一 Worker 内の child Run として実行する拡張。execPaths は resolver / 非空 mounts 設定時に既定有効、明示 true/false も可。有効なら `/` を含む名前は spawn cwd 基準の async VFS（mount 含む）から読み、regular file の wasm magic を検査する。execute bit は不要。bare name は child env の PATH を順に検索し、未設定時は `/usr/local/bin:/usr/bin:/bin`、空成分 / 相対 dir は spawn cwd 基準。候補無しなら resolver に委譲。missing / ENOTDIR / 非 wasm / 非 regular はスキップし、resolver も未解決なら EACCES 優先、次に ENOEXEC、残りは ENOENT（実 moonrun 同様 cli/sh 0.2.1 は全 spawn error で127）。非 wasm を越えて検索する点は ENOEXEC で止まる本家と異なる browser policy。false 時は全名前を resolver に委譲。ネイティブ executable は無し。VFS / open-file offset は共有、cwd/env/kernel は子ごと。正常=0、exit は下位8bit、trap/host failure=1、panic=101、signal は kernel の既存の負数表現。top Run の終了で残る子は停止。extra fd / policy transfer / detached process は非対応 | 本家 moonrun の OS process ではなく embedder 提供プログラムを実行する opt-in 拡張。filesystem PATH 優先の後の resolver fallback は moonrun-js 独自。async stdio は既存 kernel pipe と process bridge で背圧を維持。legacy/WASI 出力も pipe の背圧で JSPI suspension しうる（start section からの suspend は不可）。詳細 docs/browser.md |
 | D46 | Browser streaming stdin は async read job で入力到着まで待ち、64 KiB を基準に背圧を返す。同期 legacy/WASI read は待てず、現時点で空なら EOF。signal は仮想 capture に配送し、default/kill は import・suspend 境界で Run を終了する。pid は Worker 内の合成通し番号。OS tty / 任意の process group 選択 / CPU-bound wasm の個別 preemption は無し | postMessage と同一 Worker の単一 JS event loop の制約。`signal(n, {target: 'group'})` は top Run と全子孫を一つの前景 group として通常の signal 経路に配送する。shell が生き残るには guest 自身の SIGINT 捕捉が必要。cli/sh 0.2.1 は捕捉せず signal 2 で終了する |
 | D47 | Browser の async provider mount は最長 prefix で既定のメモリ VFS に重ねる拡張。runInWorker では provider は main thread 上、Result と range read を postMessage で中継。fs jobs の取消は既存どおり完了待ち。同期 legacy/WASI は取得済み cache のみ利用でき、未取得は port EAGAIN（WASI AGAIN、legacy は既存 panic）、同期の mount write/truncate は EROFS。既定の run-local byte cache は合計64 MiB、cache:false で無効化 | FileSystemDirectoryHandle provider は picked folder / OPFS を扱い、既定 cache:false。rename は native move が無ければ ENOSYS、symlink・POSIX permission/ownership は無し。inode は path ごとに合成。cross-mount rename は EXDEV。任意の OS filesystem を直接提供するものではない。詳細 docs/browser.md |
+| D48 | `thread_pool/make_openat_job` / `make_removeat_job` に有効なディレクトリ handle を渡すと Job は ENOSYS で失敗する。無効な handle（cwd 基準）は従来の open / remove と同じ | moonrun 0.1.20261104 が async の directory-relative API（上流 PR 716）向けに追加した import。公開済みの async（0.22.7 と main）は有効な parent でまだ panic するので、現行のゲストは呼ばない。ホストの path 操作と policy 検査は cwd 基準のパスしか扱わず、相対パスを cwd で解決すると別のファイルを開く・削除する危険があるため、明示的に失敗させる |
+| D49 | moonrun の V8 実行セッション（`--daemon` / policy の `process.ipc`、`--virtual-process` / `process.virtualize`）は使えない。clap の解析・`--help`・相互排他の usage error は本家と同じで、要求されると `Error: … are not supported by moonrun-js` で exit 1（両方は本家と同じ `IPC virtual process sessions are not supported yet`）。上流の IPC endpoint 変数を持つ子として起動されても、常にローカル実行する | moonrun 0.1.20261104 の機能。Engine を native の子孫と共有する IPC session と、仮想 process tree・内部 moonx は moonrun 自身の V8 Engine と supervisor に依存し、moonrun-js の process 実装に対応物がない。黙って通常実行すると process の意味が変わるため拒否する |
+| D50 | WASI のディレクトリ descriptor は開いた時のパスを持ち、使うたびに正規化する。本家は OS の directory handle を持つので、開いた後にディレクトリが移動・改名されても追従するが、moonrun-js では元のパスで解決する（消えていれば NOENT、preopen 外なら NOTCAPABLE） | moonrun 0.1.20261104 は WASI を handle 基準（openat / unlinkat）にした。Node / Deno / Bun の公開 API に handle 相対の open / unlink はなく、`/proc/self/fd` を使う方法は Linux 以外と browser で使えない。policy 検査（HostFs）は本家と同じ intent・対象で行う |
 
 P6 の測定上の注意:
 
@@ -65,6 +68,13 @@ P6 の測定上の注意:
   total=505–520 ms、exit=42 の例を観測した。待機完了を人為的に遅らせたり、
   任意の timing failure を flaky として許したりしていない。
   以下の 546 件・27 invocation の測定は旧互換対象の履歴である。
+
+- 2026-11-07（2 回目）: 互換対象を moonrun 0.1.20261104（moon `940aa18`）、async pin
+  `5c8d124`、toolchain 0.10.20 に更新。core に core/async が入り、core suite は
+  `--unordered` で比較する（9291 / 8759 tests）。Node は core wasm で core/async の D16
+  9 件と helper の stderr、async 588 件中 9 件（D16）のみ。Deno はそれに D33–D36 と
+  D39（flaky）、Bun は D16 / D33 と core の D3。reuse_addr の上流テストは async main
+  `0f6ef07` で 100 ms の sleep に頼らない形に直っている。
 
 - 2026-11-07: CI の Deno async は 10-29・11-01・11-02・11-04・11-06 に 16 件失敗した
   （D16 / D33–D36 の 14 件、D39 index 0、未登録の 1 件）。当時の CI ログは test 名を
@@ -92,7 +102,8 @@ Bun の分類（part 1 → part 2）:
 CI の期待差分:
 
 - `scripts/suite.ts` は既定で `test/conformance/expected-differences.json` を読む。`--expected-differences <json>` で別の一覧を指定できる。runtime・suite・target・wasm invocation と test file/index を限定し、ID がこの表にあることを検証する。`-p` の指定時はその package の期待差分だけを検査する。
-- 一覧には Bun core の D3（各 target 39 invocations / 339 test records）、全 runtime の async D16（9 tests）、Deno async の D33–D36（1 invocation / 5 tests）、Bun async の D33（1 test）を登録した。D39 の ctime test 2 件（index 0 / 2、別々の項目）だけは `flaky: true` で出ても出なくてもよい。任意の差を flaky にすることは許さない。D17 / D40 と Bun の待機時間検査は期待差分に入れていない。
+- 一覧には Bun core の D3（2026-11-07 の再確認で 44 invocations / 両 target 計 784 test records）、全 runtime の async D16（9 tests）と core suite の core/async D16（9 tests と stderr）、Deno の D33–D36（async と core/async の socket、各 5 tests）、Bun の D33（各 1 test）を登録した。D39 の ctime test 2 件（index 0 / 2、別々の項目）だけは `flaky: true` で出ても出なくてもよい。任意の差を flaky にすることは許さない。D17 / D40 と Bun の待機時間検査は期待差分に入れていない。
 - fingerprint は reference / actual の **両方**の result record を固定する。D3 はフレームの名前・位置だけを除き、フレーム数・エラー文・全ての他のフィールドを保持する（JSC の divide/remainder by zero 等の文言も固定）。D34 は message 内で同一であることを確認した loopback / wildcard の port だけを可変とする。異なる port の組み合わせや別のエラーは一致しない。
+- stderr を期待差分にできるのは D16 だけ（`stderrReports`、target ごと）。core/async の lock test が失敗すると、子の native helper（`async/test_programs/lock_file`）が stdin の終わりで panic し、継承した stderr に報告を書く。何個の helper がどの報告（待っていた位置で 3 種類のスタック）を書くか、その順序（行の途中でも混ざる）は実行ごとに変わるが、各報告の bytes は固定である。そこで項目には報告の全文を記録し、reference の stderr が空で、actual の stderr の byte 数がちょうど報告の整数個の和になる時だけ一致とする。報告に無い byte・途中で切れた報告・stderr 無しは項目全体の不一致になる。D16 の result record がすべて一致することも同時に要る。
 - 一覧と異なる出力・新しい test の差・exit / signal / stderr の差は失敗。必須の期待差分が無くなっても失敗し、解消済みの項目の更新を要求する。既存の D3 stderr / D12 順序の正規化は継続する。列挙した result record 以外の stdout は変更しない。
 - exit 0 は「差が全て登録通り」であり、互換レベル L2 / L3 の達成ではない。raw の一致 invocation 数と `mismatches` を残し、`expected` / `unexpected` / `missingExpected` と実際に一致した divergence ID を別に報告する。

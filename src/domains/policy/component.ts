@@ -1,6 +1,7 @@
 // One Run's sandbox policy, environment and Host Filesystem, from the moonrun-policy
 // component (crates/moonrun-policy: upstream policy/**, runtime/environment*.rs,
-// runtime/working_directory.rs and filesystem/mod.rs, verbatim). The component decides
+// runtime/working_directory.rs, filesystem/{mod,grant,host}.rs and
+// unstable_api/filesystem.rs, verbatim). The component decides
 // and renders moonrun's texts; it reaches the OS only through the capabilities given at
 // construction (crates/os). See WIRING.md for where each check is consulted.
 import { ComponentAbi, nulList, utf8 } from '../../components/abi.ts';
@@ -13,6 +14,23 @@ import type { Resource } from '../../kernel/resource.ts';
 import type { EnvPort } from '../../ports/env.ts';
 import { err, ok, type Result } from '../../ports/result.ts';
 
+/** A WASI path operation's HostFs check (`checkWasi`). */
+export type WasiCheck =
+  | {
+      readonly kind: 'open-file';
+      readonly base: string;
+      readonly path: string;
+      readonly read: boolean;
+      readonly write: boolean;
+    }
+  | { readonly kind: 'open-directory'; readonly base: string; readonly path: string }
+  | {
+      readonly kind: 'read-link' | 'create-directory' | 'read-directory';
+      readonly hostPath: string;
+    }
+  | { readonly kind: 'rename'; readonly from: string; readonly to: string }
+  | { readonly kind: 'remove-at'; readonly base: string; readonly path: string };
+
 /** An `anyhow` error chain, outermost context first. */
 export interface PolicyError {
   readonly chain: readonly string[];
@@ -21,8 +39,17 @@ export interface PolicyError {
 /** A legacy whole-file operation's failure text (what the import panics with). */
 export type FsOutcome<T> = Result<T, string>;
 
-const NOT_A_FILE = -1; // ABSENT
-const NO_CANONICAL_PATH = -2; // usize::MAX - 1
+const UNTRACKED = -1; // ABSENT: FileGrant::UNTRACKED
+const NO_CANONICAL_PATH = -2; // usize::MAX - 1: a file opened without a recorded path
+const STDIO = -3; // usize::MAX - 2: FileGrant::STDIO
+
+/** The selected policy's execution-session requests (moonrun `RunOptions`). */
+export interface PolicySession {
+  /** `process.virtualize`. */
+  readonly virtualize: boolean;
+  /** `process.ipc`. */
+  readonly ipc: boolean;
+}
 
 /** Component status codes (`abi.rs` `host_code`) as kernel errors. */
 function hostError(code: number): AsyncError | undefined {
@@ -74,14 +101,28 @@ export class PolicyComponent {
     return err({ chain: JSON.parse(this.#abi.resultText()) as string[] });
   }
 
-  /** `--policy PATH [--policy-source-dir DIR]` (moonrun `policy::load_file_with_source_dir`). */
-  loadFile(path: Uint8Array | string, sourceDir?: Uint8Array | string): Result<void, PolicyError> {
-    return this.#installed(this.#abi.call('policy_load_file', path, sourceDir));
+  /**
+   * `--policy PATH [--policy-source-dir DIR]`, read and resolved before the Wasm is
+   * loaded (moonrun `RunOptions::with_policy_file_source_dir`). Returns the file's
+   * execution-session requests.
+   */
+  select(
+    path: Uint8Array | string,
+    sourceDir?: Uint8Array | string,
+  ): Result<PolicySession, PolicyError> {
+    if (this.#abi.call('policy_select', path, sourceDir) !== 0) {
+      return err({ chain: JSON.parse(this.#abi.resultText()) as string[] });
+    }
+    const bits = this.#abi.result()[0] ?? 0;
+    return ok({ virtualize: (bits & 1) !== 0, ipc: (bits & 2) !== 0 });
   }
 
-  /** The bytes of `MOONRUN_INHERITED_POLICY` (moonrun `policy::load_inherited_json`). */
-  loadInherited(contents: Uint8Array): Result<void, PolicyError> {
-    return this.#installed(this.#abi.call('policy_load_inherited', contents));
+  /**
+   * moonrun `Runtime::new` / `RuntimeConfig::realize_policy`: the inherited restriction
+   * transfer (`MOONRUN_INHERITED_POLICY`) intersected with the selected policy file.
+   */
+  realize(inherited?: Uint8Array): Result<void, PolicyError> {
+    return this.#installed(this.#abi.call('policy_realize', inherited));
   }
 
   /** No policy: unchecked Host Filesystem over the ambient environment. */
@@ -89,7 +130,7 @@ export class PolicyComponent {
     this.#abi.call('policy_init_ambient');
   }
 
-  /** What a moonx child receives (canonical JSON), when a policy is in force. */
+  /** What a child receives (the restriction transfer), when a policy is in force. */
   inheritance(): Uint8Array | undefined {
     return this.#abi.call('policy_inheritance') === 0 ? this.#abi.result() : undefined;
   }
@@ -244,15 +285,12 @@ export class PolicyComponent {
     };
     switch (payload.kind) {
       case 'open':
-        return check(
-          0,
-          [payload.access, payload.create, payload.append ? 1 : 0, payload.request.mask],
-          payload.path,
-        );
+        return check(0, [payload.access, payload.create, 0, payload.request.mask], payload.path);
       case 'fstatx':
+        return check(1, [0, 0, 0, payload.request.mask], undefined, undefined, payload.resource);
       case 'file-size':
       case 'file-time':
-        return check(1, [0, 0, 0, 0], undefined, undefined, payload.resource);
+        return check(1, [1, 0, 0, 0], undefined, undefined, payload.resource);
       case 'statx':
       case 'file-kind-by-path':
         return check(
@@ -295,6 +333,34 @@ export class PolicyComponent {
   /** `HostFs::authorize_read` (TLS key/certificate files, SQLite databases). */
   authorizeRead(path: string): AsyncError | undefined {
     return hostError(this.#abi.call('policy_authorize_read', path));
+  }
+
+  /**
+   * The HostFs check of a WASI path operation (moon `wasi/mod.rs`): `base` is the
+   * directory descriptor's path, `path` the guest path (open, remove) or the resolved
+   * host path (the others). The denial line is printed by the component.
+   */
+  checkWasi(check: WasiCheck): 'allowed' | 'denied' | 'io' {
+    const op = (): [number, number, number, string, string, string] => {
+      switch (check.kind) {
+        case 'open-file':
+          return [0, check.read ? 1 : 0, check.write ? 1 : 0, check.base, check.path, ''];
+        case 'open-directory':
+          return [1, 0, 0, check.base, check.path, ''];
+        case 'read-link':
+          return [2, 0, 0, '', check.hostPath, ''];
+        case 'create-directory':
+          return [3, 0, 0, '', check.hostPath, ''];
+        case 'rename':
+          return [4, 0, 0, '', check.from, check.to];
+        case 'remove-at':
+          return [5, 0, 0, check.base, check.path, ''];
+        case 'read-directory':
+          return [6, 0, 0, '', check.hostPath, ''];
+      }
+    };
+    const code = this.#abi.call('policy_check_wasi', ...op());
+    return code === 0 ? 'allowed' : code === 1 ? 'denied' : 'io';
   }
 
   /** `HostFs::authorize_write`. */
@@ -371,10 +437,13 @@ export class PolicyComponent {
   }
 }
 
-/** The canonical path of a file Resource as the component expects it. */
+/** A Resource's `FileGrant` as the component expects it (`abi.rs` `grant`). */
 function resourcePath(resource: Resource | undefined): string | number {
+  if (resource?.kind === 'stdio') {
+    return STDIO;
+  }
   if (resource?.kind !== 'file') {
-    return NOT_A_FILE;
+    return UNTRACKED;
   }
   return resource.file.canonicalPath ?? NO_CANONICAL_PATH;
 }

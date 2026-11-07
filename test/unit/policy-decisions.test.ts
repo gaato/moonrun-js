@@ -54,7 +54,8 @@ function load(text: string, file = 'policy.toml', env: NodeJS.ProcessEnv = {}): 
       stderr += Buffer.from(b).toString();
     }),
   );
-  const r = policy.loadFile(path.join(root, file));
+  const selected = policy.select(path.join(root, file));
+  const r = selected.ok ? policy.realize() : selected;
   if (!r.ok) {
     throw new Error(r.error.chain.join('\n'));
   }
@@ -115,20 +116,29 @@ describe('filesystem decisions', () => {
     stderr();
   });
 
-  it('fd-based Jobs use the canonical path recorded at open; no file is EBADF', () => {
-    const payload = (resource: Resource): FilesystemPayload =>
+  it('fd-based Jobs check the Resource grant: opened path, untracked, stdio', () => {
+    const payload = (resource: Resource, mask: number): FilesystemPayload =>
       ({
         kind: 'fstatx',
         resource,
-        request: { mask: 1 },
+        request: { mask },
         result: undefined,
       }) as unknown as FilesystemPayload;
-    expect(policy.checkJob(payload(fileResource(at('read/a.txt'))))).toBeUndefined();
-    expect(policy.checkJob(payload(fileResource(undefined)))).toEqual({
+    const SIZE = 2;
+    expect(policy.checkJob(payload(fileResource(at('read/a.txt')), SIZE))).toBeUndefined();
+    expect(policy.checkJob(payload(fileResource(undefined), SIZE))).toEqual({
       kind: 'permission-denied',
     });
     expect(stderr()).toBe('Sandbox policy blocked file read: "<untracked resource>"\n');
-    expect(policy.checkJob(payload({ kind: 'invalid' }))).toEqual({ kind: 'badf' });
+    // moonrun 0.1.20261104: every Resource has a FileGrant. Non-files are untracked, stdio is
+    // granted by the host, and the file kind alone is never checked.
+    expect(policy.checkJob(payload({ kind: 'invalid' }, SIZE))).toEqual({
+      kind: 'permission-denied',
+    });
+    stderr();
+    expect(policy.checkJob(payload({ kind: 'stdio', stream: 0 }, SIZE))).toBeUndefined();
+    expect(policy.checkJob(payload(fileResource(undefined), 1))).toBeUndefined();
+    expect(stderr()).toBe('');
   });
 
   it('locks: shared needs nothing, exclusive needs write', () => {
@@ -274,16 +284,23 @@ describe('environment provisioning and inheritance', () => {
     expect(policy.env().get('A')).toBeUndefined();
   });
 
-  it('serializes the inherited payload: canonical roots, env copies everything, no secrets', () => {
+  it('serializes the inherited restriction transfer: canonical roots, no Env, no secrets', () => {
     const { policy } = load(
       '[env.set]\nSECRET = "s3cret"\n[fs]\nread = ["read"]\n',
       'inherit.toml',
     );
     const payload = Buffer.from(policy.inheritance() ?? new Uint8Array()).toString();
     expect(payload).not.toContain('s3cret');
-    const json = JSON.parse(payload) as { fs: { read: string[] }; env: { from_host: string[] } };
-    expect(json.fs.read).toEqual([at('read')]);
-    expect(json.env.from_host).toEqual(['*']);
+    const json = JSON.parse(payload) as {
+      version: number;
+      rule_groups: { fs: { read: { kind: string; value: { Unix: number[] } }[] } }[];
+      env?: unknown;
+    };
+    expect(json.version).toBe(3);
+    expect(json.env).toBeUndefined();
+    const read = json.rule_groups[0]?.fs.read ?? [];
+    expect(read.map((rule) => rule.kind)).toEqual(['path']);
+    expect(Buffer.from(read[0]?.value.Unix ?? []).toString()).toBe(at('read'));
   });
 
   it('reads permissions from the package-grammar script header', () => {

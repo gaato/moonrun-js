@@ -15,7 +15,7 @@ const metadata = JSON.parse(
   readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
 export const VERSION = metadata.version;
-const COMPAT = 'compat moonrun 0.1.20261023 3778465';
+const COMPAT = 'compat moonrun 0.1.20261104 940aa18';
 
 /** anyhow's `{:?}` rendering of an error chain, as printed by moonrun's `main`. */
 export function formatErrorChain(chain: readonly string[]): string {
@@ -87,6 +87,31 @@ function rustAbsolute(raw: Buffer): Uint8Array {
 
 const decoder = new TextDecoder();
 
+/**
+ * moonrun's V8 execution sessions: `--daemon` / `process.ipc` shares one Engine with
+ * native descendants, `--virtual-process` / `process.virtualize` runs virtual process
+ * trees with internal moonx. moonrun-js has neither, so it refuses them instead of
+ * running with different process semantics.
+ */
+function rejectExecutionSessions(session: {
+  readonly virtualize: boolean;
+  readonly ipc: boolean;
+}): void {
+  if (session.ipc && session.virtualize) {
+    fail(['IPC virtual process sessions are not supported yet']);
+  }
+  if (session.ipc) {
+    fail([
+      'execution sessions for native descendants (--daemon, process.ipc) are not supported by moonrun-js',
+    ]);
+  }
+  if (session.virtualize) {
+    fail([
+      'virtual process trees (--virtual-process, process.virtualize) are not supported by moonrun-js',
+    ]);
+  }
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   // moonrun takes the inherited policy before clap parses (main.rs:96-98); its errors are bare.
   const inherited = takeInheritedPolicy(process.env);
@@ -104,6 +129,33 @@ async function main(argv: readonly string[]): Promise<number> {
     writeSync(command.code === 0 ? 1 : 2, command.message);
     return command.code;
   }
+  // moonrun reads the selected policy file before loading the Wasm; the inherited ceiling
+  // and the selected rules are composed at Runtime construction (main.rs, engine.rs).
+  let policy: PolicyComponent | undefined;
+  const component = (): PolicyComponent => {
+    const module = nodeComponentModule(POLICY_URL);
+    if (!module.ok) {
+      fail([module.error.message ?? module.error.code]);
+    }
+    const h = nodeHost();
+    return new PolicyComponent(
+      module.value,
+      osCapabilities(h, (b) => h.stdio.writeStderr(b)),
+    );
+  };
+  let session = { virtualize: command.virtualProcess, ipc: command.daemon };
+  if (command.policy !== undefined) {
+    policy = component();
+    const selected = policy.select(command.policy, command.policySourceDir);
+    if (!selected.ok) {
+      fail(selected.error.chain);
+    }
+    session = {
+      virtualize: session.virtualize || selected.value.virtualize,
+      ipc: session.ipc || selected.value.ipc,
+    };
+  }
+  rejectExecutionSessions(session);
   const rawPath = Buffer.from(command.path);
   const name = decoder.decode(command.path);
   if (!existsSync(rawPath)) {
@@ -126,23 +178,14 @@ async function main(argv: readonly string[]): Promise<number> {
     fail(loaded.error.chain);
   }
   const host = nodeHost({ currentExe: rustAbsolute(rawPath) });
-  // moonrun `Runtime::new`: an inherited policy wins over `--policy`.
-  let policy: PolicyComponent | undefined;
-  if (inherited.value !== undefined || command.policy !== undefined) {
-    const module = nodeComponentModule(POLICY_URL);
-    if (!module.ok) {
-      fail([module.error.message ?? module.error.code]);
-    }
-    policy = new PolicyComponent(
-      module.value,
-      osCapabilities(host, (b) => host.stdio.writeStderr(b)),
-    );
-    const result =
-      inherited.value !== undefined
-        ? policy.loadInherited(inherited.value)
-        : policy.loadFile(command.policy ?? '', command.policySourceDir);
-    if (!result.ok) {
-      fail(result.error.chain);
+  // moonrun `Runtime::new`: the inherited ceiling intersected with the selected policy.
+  if (inherited.value !== undefined && policy === undefined) {
+    policy = component();
+  }
+  if (policy !== undefined) {
+    const realized = policy.realize(inherited.value);
+    if (!realized.ok) {
+      fail(realized.error.chain);
     }
   }
   const outcome: RunOutcome = await run(loaded.value, host, {

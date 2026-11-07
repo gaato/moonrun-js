@@ -1155,6 +1155,27 @@
       "note": "wasmtime-feature test; the reference binary is V8"
     },
     {
+      "id": "backends/legacy-fs-host-error",
+      "area": "errors",
+      "source": "unstable_api.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/legacy-fs-host-error.wat"
+      },
+      "note": "a failed legacy filesystem import ends the run with the host error text"
+    },
+    {
+      "id": "backends/denied-legacy-fs-host-error",
+      "area": "policy",
+      "source": "unstable_api.rs",
+      "wasm": {
+        "wat": "test/conformance/wat/legacy-fs-host-error.wat"
+      },
+      "files": {
+        "policy.json": "{}"
+      },
+      "argv": ["--policy", "<cwd>/policy.json", "<wasm>"]
+    },
+    {
       "id": "backends/run-host-error",
       "area": "errors",
       "source": "engine_backends.rs",

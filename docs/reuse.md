@@ -4,6 +4,22 @@
 
 ## 決定
 
+2026-11-07: 流用元を moon `940aa18df6db921386e87e16fa94b84fa267864b`
+（moonrun `0.1.20261104`）へ更新した。上流は policy を構築・継承・転送
+（`source.rs`・`transfer.rs`）に分け、Host Filesystem を `filesystem/{grant,host}.rs`
+と OS 機構の `filesystem/os.rs` に、legacy fs の表現を `unstable_api/filesystem.rs`
+に分けた。ポリシー wasm はこれらをそのまま流用する。OS 機構（handle 相対の
+openat / unlinkat）は moonrun-js のホストが行うので `filesystem/os.rs` は stub に
+して、届けば unsupported で失敗させる。`filesystem/job/mod.rs` の stub は
+`Job::check_policy` と、WASI の各パス操作が HostFs で行う検査（`check_wasi`）を
+橋渡しする。継承ポリシーの転送形式は serde の Unix 表現の `OsString` を含むので、
+wasm32 にない serde 実装を `os_serde` として補い、`serde-os-string-*` 規則で
+`transfer.rs` のそのフィールドだけに付ける。CLI の clap 定義は
+`cli_support.rs` の `struct MoonrunCli` に移った。source map の読み込みは moonutil
+`wasm_source_map.rs` に移ったので、診断 wasm はそれを流用する。
+`std::{fs, io}` をまとめて import するファイルには `std-fs-io-module` 規則を足し、
+OS に届かない既知の行は `osCallExceptions` に理由付きで登録する。
+
 2026-10-24: 流用元を moon `3778465a252d2838357dddf25dc0ebf3ff3ba40f`
 （moonrun `0.1.20261023`）へ更新した。`.mbtx` の `permission` ブロックは
 front matter と同じ文法で読む必要があるため、moonutil の `moon_pkg/`
@@ -21,7 +37,7 @@ OS に依存する関数をポリシー wasm に取り込まないためで、�
 | `policy/**`、`runtime/environment*.rs`、moonutil `front_matter.rs` | 流用する | 本家と 164/164 一致（TS は `.mbtx` の 7 件で不一致）。上流の変更が多い | `src/domains/policy/*`、`src/hosts/node/policy-loader.ts` の大半 |
 | `filesystem/mod.rs`、`runtime/working_directory.rs`（Host Filesystem） | 流用する（下の 3 点を直してから） | 上流の変更が多い（2026-06 以降 26 回）。ポリシー判定と一体 | `src/abi/legacy/fs-unstable.ts`・`fs-runtime.ts` の OS 以外の部分、ポリシーのパス解決 |
 | moonutil `demangle.rs`、`source_map.rs`、`wasm_diagnostic.rs`、`memory_sanitizer.rs` | 流用する | 完全にそのままビルドできる。TS 版と差ゼロ | `src/diagnostics/*`、`src/abi/legacy/sanitizer.ts` の大半 |
-| `main.rs` の clap 定義（`struct Commandline`） | 流用する | エラーとヘルプが本家と一致。プログラム名と版は実行時に注入（D5） | `src/hosts/node/args.ts` |
+| `cli_support.rs` の clap 定義（`struct MoonrunCli`、0.1.20261104 まで `main.rs` の `struct Commandline`） | 流用する | エラーとヘルプが本家と一致。プログラム名と版は実行時に注入（D5） | `src/hosts/node/args.ts` |
 | `filesystem/job/stat.rs`（stat 結果の配置） | TS のまま | stat ごとに呼ばれる 65 行で、上流の変更も少ない。流用版 wasm との一致を CI のテストで確かめる | — |
 | `sqlite/policy.rs` | 流用済み（P5、ポリシー crate に追加） | 純粋なロジック | — |
 | `wasi/mod.rs`、`async_api/*` | 流用しない | ゲストのメモリ全体を `&mut [u8]` で受け取る作りで、別インスタンスからは呼び出しごとの全コピーが要る | — |
@@ -50,7 +66,7 @@ OS に依存する関数をポリシー wasm に取り込まないためで、�
 - `crates/` は 1 つの workspace（`os`・`libc`・`tempfile`・`moonutil` と `moonrun-policy`・`moonrun-diag`・`moonrun-cli`、テスト専用の `stat-layout`）。`tls-engine` は別 workspace のまま（依存の版を moon に揃えず、パッチ済み ring を `.cache/` に要るため）。`Cargo.lock` は `sync-upstream.ts` が moon の `Cargo.lock` に揃え、`--check` で検査する。
 - 取り出したファイルの先頭に `// upstream: moonbitlang/moon@<pin> <path> (rewrites: …)` を付け、pin が変わると `--check` が失敗する。
 - 上の 3 点: (1) `filesystem/job/mod.rs` のスタブが `Job` の名前で非公開の検査を橋渡しする（`Job::check_policy` の対応表は手で上流に合わせる）。(2) `write_bytes_to_file*` は「バイト列でない」を境界で渡し、拒否が先に勝つ。(3) 受け入れた。legacy fs を使う実行は初回呼び出しで約 1ms の compile を払う。
-- `main.rs` は丸ごと取り出し、`crates/moonrun-cli/build.rs` が `struct Commandline` だけを切り出す。
+- `cli_support.rs` は丸ごと取り出し、`crates/moonrun-cli/build.rs` が `struct MoonrunCli` だけを切り出す。
 - `process/mod.rs` の `ChildAuthority` は OS 依存のファイルにあるので TS（`src/domains/policy/child-authority.ts`）のまま。
 
 - P5: `sqlite/policy.rs` の admission / open flags / SQL authorizer を `moonrun-policy` に流用。SQLite 本体は libsqlite3-sys 0.38.2 の SHA-256 検証済み amalgamation（3.53.2）から `scripts/build-sqlite.ts` でビルドし、`src/domains/sqlite/sqlite-engine.wasm` を配布する。ホスト側 VFS と同一 Run 内ロックを TS、上流と同じハンドル寿命・mutex・ジョブ結果を SQLite domain が持つ。

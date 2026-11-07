@@ -15,6 +15,10 @@ export interface Command {
   readonly stackSize: number | undefined;
   readonly policy: Uint8Array | undefined;
   readonly policySourceDir: Uint8Array | undefined;
+  /** `--daemon`: share the execution host with native descendants (moonrun: V8 only). */
+  readonly daemon: boolean;
+  /** `--virtual-process`: virtual process identities and internal moonx (moonrun: V8 only). */
+  readonly virtualProcess: boolean;
 }
 
 /** clap printed a message and wants this exit status (help/version: 0 on stdout). */
@@ -39,6 +43,8 @@ interface Parsed {
   readonly stack_size: number | null;
   readonly policy_hex: string | null;
   readonly policy_source_dir_hex: string | null;
+  readonly daemon: boolean;
+  readonly virtual_process: boolean;
 }
 
 const fromHex = (hex: string): Uint8Array => Uint8Array.from(Buffer.from(hex, 'hex'));
@@ -66,6 +72,8 @@ export function parseArgs(argv: readonly Uint8Array[], options: ParseOptions): C
     policy: parsed.policy_hex === null ? undefined : fromHex(parsed.policy_hex),
     policySourceDir:
       parsed.policy_source_dir_hex === null ? undefined : fromHex(parsed.policy_source_dir_hex),
+    daemon: parsed.daemon,
+    virtualProcess: parsed.virtual_process,
   };
 }
 

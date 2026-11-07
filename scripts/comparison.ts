@@ -73,6 +73,13 @@ export interface ExpectedDifference {
   readonly tests: Readonly<Record<string, readonly number[]>>;
   /** Fingerprint per target; absent targets are outside this entry's scope. */
   readonly fingerprints: Readonly<Record<string, string>>;
+  /**
+   * Per target, the exact panic reports this divergence makes its aborted helpers write:
+   * the reference stderr is empty and the actual one is an interleaving of copies of
+   * them (`stderrOfReports`). Only D16 may declare them: its failed lock tests abort
+   * their native helpers, which report on the inherited stderr.
+   */
+  readonly stderrReports?: Readonly<Record<string, readonly string[]>>;
   readonly flaky?: boolean;
 }
 export type ExpectedDifferences = Readonly<Record<string, readonly ExpectedDifference[]>>;
@@ -88,6 +95,11 @@ function testKeys(entry: ExpectedDifference): string[] {
  * falls within a second. One entry each: they fail independently of each other.
  */
 const D39_FLAKY_TESTS = ['{"timestamp_test.mbt":[0]}', '{"timestamp_test.mbt":[2]}'];
+/** Where those tests run: moonbitlang/async's fs package, and its copy in core/async. */
+const D39_FLAKY_INVOCATIONS = [
+  JSON.stringify(['async', 'moonbitlang/async/fs/fs.blackbox_test.wasm']),
+  JSON.stringify(['core', 'async/fs/fs.blackbox_test.wasm']),
+];
 
 export function validateExpectedDifferences(
   list: ExpectedDifferences,
@@ -107,11 +119,25 @@ export function validateExpectedDifferences(
         (entry.flaky !== true ||
           runtime !== 'deno' ||
           entry.divergence !== 'D39' ||
-          entry.suite !== 'async' ||
-          entry.invocation !== 'moonbitlang/async/fs/fs.blackbox_test.wasm' ||
+          !D39_FLAKY_INVOCATIONS.includes(JSON.stringify([entry.suite, entry.invocation])) ||
           !D39_FLAKY_TESTS.includes(JSON.stringify(entry.tests)))
       )
         throw new Error('Only the D39 ctime tests may be flaky');
+      if (entry.stderrReports !== undefined) {
+        if (entry.divergence !== 'D16') {
+          throw new Error('Only D16 may record a stderr difference');
+        }
+        for (const [target, reports] of Object.entries(entry.stderrReports)) {
+          if (
+            entry.fingerprints[target] === undefined ||
+            reports.length === 0 ||
+            new Set(reports).size !== reports.length ||
+            reports.some((report) => !report.endsWith('\n'))
+          ) {
+            throw new Error('Invalid stderr reports');
+          }
+        }
+      }
       const keys = testKeys(entry);
       if (keys.length === 0 || Object.keys(entry.fingerprints).length === 0)
         throw new Error('Expected difference needs tests and target fingerprints');
@@ -189,12 +215,52 @@ export function differenceFingerprint(
     .digest('hex');
 }
 
+/** At most this many aborted helper reports in one invocation's stderr. */
+const MAX_STDERR_REPORTS = 32;
+
+/**
+ * Whether `stderr` is some interleaving of copies of these exact reports (at least one).
+ * D16's failed lock tests abort several native helpers at once; each writes one of a few
+ * fixed panic reports, and their writes interleave on the shared stderr, even mid-line.
+ * Which reports, how many, and the order vary per run; the bytes of each do not, so the
+ * byte counts of `stderr` must be exactly a sum of the reports' byte counts.
+ */
+export function stderrOfReports(stderr: string, reports: readonly string[]): boolean {
+  const histogram = (text: string): number[] => {
+    const counts = new Array<number>(256).fill(0);
+    for (const byte of Buffer.from(text)) counts[byte] = (counts[byte] ?? 0) + 1;
+    return counts;
+  };
+  const target = histogram(stderr);
+  const parts = reports.map(histogram);
+  const search = (rest: number[], index: number, used: number): boolean => {
+    if (rest.every((n) => n === 0)) return used > 0;
+    const part = parts[index];
+    if (part === undefined || used >= MAX_STDERR_REPORTS) return false;
+    // Try every count of this report, most first, then the remaining reports.
+    let copies = 0;
+    const current = [...rest];
+    const states: number[][] = [[...current]];
+    while (copies + used < MAX_STDERR_REPORTS && part.every((n, i) => (current[i] ?? 0) >= n)) {
+      for (let i = 0; i < 256; i++) current[i] = (current[i] ?? 0) - (part[i] ?? 0);
+      copies++;
+      states.push([...current]);
+    }
+    for (let k = copies; k >= 0; k--) {
+      if (search(states[k] ?? [], index + 1, used + k)) return true;
+    }
+    return false;
+  };
+  return reports.length > 0 && search(target, 0, 0);
+}
+
 export function matchExpectedDifferences(
   reference: string,
   actual: string,
   entries: readonly ExpectedDifference[],
   target: string,
-): { stdout: string; matched: ExpectedDifference[] } {
+  stderr?: { readonly reference: string; readonly actual: string },
+): { stdout: string; matched: ExpectedDifference[]; stderrMatched: boolean } {
   const ref = resultRecords(reference),
     js = resultRecords(actual);
   const replacements = new Map<string, string>();
@@ -211,6 +277,13 @@ export function matchExpectedDifferences(
       differenceFingerprint(entry.divergence, pairs) !== entry.fingerprints[target]
     )
       continue;
+    // An entry that declares its stderr matches only together with exactly that stderr.
+    const reports = entry.stderrReports?.[target];
+    if (
+      reports !== undefined &&
+      (stderr === undefined || stderr.reference !== '' || !stderrOfReports(stderr.actual, reports))
+    )
+      continue;
     matched.push(entry);
     for (const [a, b] of pairs) replacements.set(b, a);
   }
@@ -223,5 +296,6 @@ export function matchExpectedDifferences(
         .join('\n'),
     ),
   );
-  return { stdout, matched };
+  const stderrMatched = matched.some((entry) => entry.stderrReports?.[target] !== undefined);
+  return { stdout, matched, stderrMatched };
 }

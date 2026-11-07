@@ -20,6 +20,8 @@ libsqlite3-sys = { path = "../libsqlite3-sys" }
 tempfile = { path = "../tempfile" }
 moonutil = { path = "../moonutil", features = ["front_matter", "policy_transport"] }
 anyhow = { workspace = true }
+dunce = { workspace = true }
+globset = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

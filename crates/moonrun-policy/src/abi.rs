@@ -14,23 +14,36 @@ use std::sync::Arc;
 use anyhow::Context;
 
 use crate::async_host::{AsyncHostError, AsyncHostResult};
-use crate::filesystem::{FsOperationResults, HostFs, HostFsError, Job};
+use crate::filesystem::{HostFs, Job};
 use crate::os::unix::ffi::OsStrExt;
-use crate::policy::{self, NetOperation, NetPolicy, ProcessPolicy, SocketRule};
-use crate::runtime::{Env, EnvProvisioning, WorkingDirectory};
+use crate::policy::{self, LoadedPolicy, NetOperation, NetPolicy, Policy, ProcessPolicy, ResolvedConnectRule};
+use crate::runtime::{Env, WorkingDirectory};
+use crate::unstable_api::bridge::{self, Results, WriteBytesError};
 
 const ABSENT: usize = usize::MAX;
-/// A Resource that is a file but has no canonical path (`Resource::canonical_path` None).
+/// A file Resource without a canonical path (`FileGrant::from_opened_path(None)`).
 const NO_CANONICAL_PATH: usize = usize::MAX - 1;
+/// A stdio Resource (`FileGrant::STDIO`).
+const STDIO: usize = usize::MAX - 2;
+
+/// The kernel's record of a Resource's `FileGrant` (`Resource::file_grant`).
+pub(crate) enum Grant {
+    /// `FileGrant::STDIO`.
+    Stdio,
+    /// A file opened by path: `FileGrant::from_opened_path` of the path saved at open.
+    Opened(Option<PathBuf>),
+    /// `FileGrant::UNTRACKED`: sockets, pipes and the other Resources.
+    Untracked,
+}
 
 struct Run {
     filesystem: HostFs,
     environment: Arc<Env>,
     net: Option<NetPolicy>,
     process: Option<ProcessPolicy>,
-    resolved: Vec<SocketRule>,
+    resolved: Vec<ResolvedConnectRule>,
     inheritance: Option<Vec<u8>>,
-    results: FsOperationResults,
+    results: Results,
 }
 
 thread_local! {
@@ -108,40 +121,57 @@ pub extern "C" fn policy_result_len() -> usize {
     RESULT.with(|result| result.borrow().len())
 }
 
-// ----- construction (moonrun `Runtime::new`) -----
+// ----- construction (moonrun `Engine::with_policy_file`, `RuntimeConfig::realize_policy`, `Runtime::new`) -----
 
-fn install(loaded: anyhow::Result<(policy::Policy, EnvProvisioning)>) -> i32 {
-    // runtime/mod.rs:157-160 realizes the environment under this context.
-    let realized = loaded.and_then(|(policy, provisioning)| {
-        let environment = provisioning
-            .realize()
-            .context("failed to construct the Runtime environment")?;
-        Ok((policy, environment))
+const POLICY_CONTEXT: &str =
+    "failed to load sandbox policy (experimental); run `moonrun --help` for policy format notes";
+
+fn install(policy: Option<Policy>, environment: Env) {
+    let inheritance = policy
+        .as_ref()
+        .and_then(|policy| policy.open_transfer().ok())
+        .and_then(|transfer| transfer.read().ok());
+    let environment = Arc::new(environment);
+    let filesystem = HostFs::new(
+        policy.as_ref().map(Policy::filesystem),
+        Arc::clone(&environment),
+        Arc::new(WorkingDirectory::Ambient),
+    );
+    RUN.with(|run| {
+        *run.borrow_mut() = Some(Run {
+            filesystem,
+            environment,
+            net: policy.as_ref().map(Policy::network),
+            process: policy.as_ref().map(Policy::process),
+            resolved: Vec::new(),
+            inheritance,
+            results: Results::default(),
+        });
     });
-    match realized {
-        Ok((mut policy, environment)) => {
-            let inheritance = policy
-                .take_policy_inheritance()
-                .and_then(|inheritance| inheritance.open_transfer().ok())
-                .and_then(|transfer| transfer.read().ok());
-            let environment = Arc::new(environment);
-            let filesystem = HostFs::new(
-                policy.take_filesystem_policy(),
-                Arc::clone(&environment),
-                Arc::new(WorkingDirectory::Ambient),
-            );
-            RUN.with(|run| {
-                *run.borrow_mut() = Some(Run {
-                    filesystem,
-                    environment,
-                    net: policy.take_network_policy(),
-                    process: policy.take_process_policy(),
-                    resolved: Vec::new(),
-                    inheritance,
-                    results: FsOperationResults::default(),
-                });
-            });
-            set_result(Vec::new());
+}
+
+thread_local! {
+    /// The policy file read by `policy_select`, until `policy_realize` composes it.
+    static SELECTED: RefCell<Option<LoadedPolicy>> = const { RefCell::new(None) };
+}
+
+/// `--policy PATH [--policy-source-dir DIR]` (`dir_len` ABSENT without the option):
+/// moonrun reads and resolves the file while preparing the run, before the Wasm is
+/// loaded (`RunOptions::with_policy_file_source_dir`). 0 = read (result: bit 0
+/// `process.virtualize`, bit 1 `process.ipc`, as one byte); 1 = failed, result = the
+/// error chain, outermost first.
+///
+/// # Safety
+/// The buffers must come from `policy_alloc`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn policy_select(path: *const u8, path_len: usize, dir: *const u8, dir_len: usize) -> i32 {
+    let path = Path::new(unsafe { os_input(path, path_len) });
+    let dir = unsafe { optional_os(dir, dir_len) }.map(Path::new);
+    match policy::read_file(path, dir).context(POLICY_CONTEXT) {
+        Ok(selected) => {
+            let session = u8::from(selected.virtualize) | (u8::from(selected.ipc) << 1);
+            SELECTED.with(|slot| *slot.borrow_mut() = Some(selected));
+            set_result(vec![session]);
             0
         }
         Err(error) => {
@@ -151,30 +181,51 @@ fn install(loaded: anyhow::Result<(policy::Policy, EnvProvisioning)>) -> i32 {
     }
 }
 
-/// `--policy PATH [--policy-source-dir DIR]` (`dir_len` ABSENT without the option).
-/// 0 = loaded; 1 = failed, result = the error chain (runtime/mod.rs's context first).
-///
-/// # Safety
-/// The buffers must come from `policy_alloc`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn policy_load_file(path: *const u8, path_len: usize, dir: *const u8, dir_len: usize) -> i32 {
-    let path = Path::new(unsafe { os_input(path, path_len) });
-    let dir = unsafe { optional_os(dir, dir_len) }.map(Path::new);
-    install(policy::load_file_with_source_dir(path, dir).context(
-        "failed to load sandbox policy (experimental); run `moonrun --help` for policy format notes",
-    ))
-}
-
-/// The contents of the `MOONRUN_INHERITED_POLICY` descriptor.
+/// `Runtime::new`: the source environment (ambient, or an owned snapshot of it for an
+/// external child, `inherited_len` ABSENT otherwise), then `realize_policy`: decode the
+/// inherited transfer, intersect the selected policy and provision Env. 0 = installed;
+/// 1 = failed, result = the error chain.
 ///
 /// # Safety
 /// The buffer must come from `policy_alloc`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn policy_load_inherited(contents: *const u8, len: usize) -> i32 {
-    install(
-        policy::load_inherited_json(unsafe { input(contents, len) })
-            .context("failed to load inherited sandbox policy (experimental)"),
-    )
+pub unsafe extern "C" fn policy_realize(inherited: *const u8, inherited_len: usize) -> i32 {
+    let inherited = (inherited_len != ABSENT).then(|| unsafe { input(inherited, inherited_len) }.to_vec());
+    let selected = SELECTED.with(|slot| slot.borrow_mut().take());
+    let realized = (|| -> anyhow::Result<(Option<Policy>, Env)> {
+        let source = if inherited.is_some() {
+            Env::owned(Env::ambient().entries())?
+        } else {
+            Env::ambient()
+        };
+        (|| -> anyhow::Result<(Option<Policy>, Env)> {
+            let mut policy = inherited.as_deref().map(Policy::from_transfer).transpose()?;
+            let environment = match selected {
+                Some(selected) => {
+                    let child = selected.policy;
+                    policy = Some(match policy {
+                        Some(parent) => parent.intersect(child),
+                        None => child,
+                    });
+                    selected.environment.provision(&source)?
+                }
+                None => source,
+            };
+            Ok((policy, environment))
+        })()
+        .context(POLICY_CONTEXT)
+    })();
+    match realized {
+        Ok((policy, environment)) => {
+            install(policy, environment);
+            set_result(Vec::new());
+            0
+        }
+        Err(error) => {
+            set_result(chain(&error));
+            1
+        }
+    }
 }
 
 /// No policy: the Host Filesystem over the ambient environment, nothing is checked.
@@ -189,7 +240,7 @@ pub extern "C" fn policy_init_ambient() {
             process: None,
             resolved: Vec::new(),
             inheritance: None,
-            results: FsOperationResults::default(),
+            results: Results::default(),
         });
     });
 }
@@ -271,18 +322,18 @@ pub unsafe extern "C" fn env_unset(name: *const u8, len: usize) -> i32 {
     }
 }
 
-// ----- Host Filesystem: the `__moonbit_fs_unstable` operations -----
+// ----- Host Filesystem: the `__moonbit_fs_unstable` operations (unstable_api/filesystem.rs) -----
 
 /// The legacy (panicking) operations: 0 = ok (value as result where there is one),
-/// 1 = failed (result = the `HostFsError` text the import panics with).
-fn legacy<T>(result: Result<T, HostFsError>, value: impl FnOnce(T) -> Vec<u8>) -> i32 {
+/// 1 = failed (result = the error text the import panics with).
+fn legacy<T>(result: Result<T, String>, value: impl FnOnce(T) -> Vec<u8>) -> i32 {
     match result {
         Ok(v) => {
             set_result(value(v));
             0
         }
         Err(error) => {
-            set_result(error.to_string().into_bytes());
+            set_result(error.into_bytes());
             1
         }
     }
@@ -310,28 +361,28 @@ macro_rules! path_export {
         pub unsafe extern "C" fn $name(path: *const u8, path_len: usize) -> i32 {
             let $path = unsafe { str_input(path, path_len) };
             with_run(|run| {
-                let $fs = run;
+                let $fs = &run.filesystem;
                 $body
             })
         }
     };
 }
 
-path_export!(hostfs_read_file_to_string, |run, path| legacy(
-    run.filesystem.read_file_to_string(path),
+path_export!(hostfs_read_file_to_string, |fs, path| legacy(
+    bridge::read_file_to_string(fs, path),
     String::into_bytes
 ));
-path_export!(hostfs_create_dir, |run, path| legacy(run.filesystem.create_dir(path), nothing));
+path_export!(hostfs_create_dir, |fs, path| legacy(bridge::create_dir(fs, path), nothing));
 path_export!(
     /// Result: NUL-terminated names.
     hostfs_read_dir,
-    |run, path| legacy(run.filesystem.read_dir(path), names)
+    |fs, path| legacy(bridge::read_dir(fs, path), names)
 );
-path_export!(hostfs_is_file, |run, path| i32::from(run.filesystem.is_file(path)));
-path_export!(hostfs_is_dir, |run, path| i32::from(run.filesystem.is_dir(path)));
-path_export!(hostfs_remove_file, |run, path| legacy(run.filesystem.remove_file(path), nothing));
-path_export!(hostfs_remove_dir, |run, path| legacy(run.filesystem.remove_dir(path), nothing));
-path_export!(hostfs_path_exists, |run, path| i32::from(run.filesystem.path_exists(path)));
+path_export!(hostfs_is_file, |fs, path| i32::from(bridge::is_file(fs, path)));
+path_export!(hostfs_is_dir, |fs, path| i32::from(bridge::is_dir(fs, path)));
+path_export!(hostfs_remove_file, |fs, path| legacy(bridge::remove_file(fs, path), nothing));
+path_export!(hostfs_remove_dir, |fs, path| legacy(bridge::remove_dir(fs, path), nothing));
+path_export!(hostfs_path_exists, |fs, path| i32::from(bridge::path_exists(fs, path)));
 
 /// # Safety
 /// The buffers must come from `policy_alloc`.
@@ -339,19 +390,7 @@ path_export!(hostfs_path_exists, |run, path| i32::from(run.filesystem.path_exist
 pub unsafe extern "C" fn hostfs_write_string_to_file(path: *const u8, path_len: usize, data: *const u8, data_len: usize) -> i32 {
     let path = unsafe { str_input(path, path_len) };
     let contents = unsafe { str_input(data, data_len) };
-    with_run(|run| legacy(run.filesystem.write_string_to_file(path, contents), nothing))
-}
-
-/// The failure of `write_bytes_to_file`: the Host Filesystem's, or the guest value's.
-enum WriteBytesError {
-    Fs(HostFsError),
-    NotBytes,
-}
-
-impl From<HostFsError> for WriteBytesError {
-    fn from(error: HostFsError) -> Self {
-        Self::Fs(error)
-    }
+    with_run(|run| legacy(bridge::write_string_to_file(&run.filesystem, path, contents), nothing))
 }
 
 /// `write_bytes_to_file`: the contents are decoded only after authorization. `data_len`
@@ -364,33 +403,29 @@ impl From<HostFsError> for WriteBytesError {
 pub unsafe extern "C" fn hostfs_write_bytes_to_file(path: *const u8, path_len: usize, data: *const u8, data_len: usize) -> i32 {
     let path = unsafe { str_input(path, path_len) };
     let result = with_run(|run| {
-        run.filesystem.write_bytes_to_file(path, || {
-            if data_len == ABSENT {
-                Err(WriteBytesError::NotBytes)
-            } else {
-                Ok(unsafe { input(data, data_len) }.to_vec())
-            }
+        bridge::write_bytes_to_file(&run.filesystem, path, || {
+            (data_len != ABSENT).then(|| unsafe { input(data, data_len) }.to_vec())
         })
     });
     match result {
         Ok(()) => 0,
         Err(WriteBytesError::Fs(error)) => {
-            set_result(error.to_string().into_bytes());
+            set_result(error.into_bytes());
             1
         }
         Err(WriteBytesError::NotBytes) => 2,
     }
 }
 
-/// Result: `HostFs::current_dir` (empty when denied).
+/// Result: `UnstableFs::current_dir` (empty when denied).
 #[unsafe(no_mangle)]
 pub extern "C" fn hostfs_current_dir() {
-    let dir = with_run(|run| run.filesystem.current_dir());
+    let dir = with_run(|run| bridge::current_dir(&run.filesystem));
     set_result(dir.into_bytes());
 }
 
 macro_rules! status_export {
-    ($name:ident, $method:ident) => {
+    ($name:ident, $function:ident) => {
         /// Status-code operation; details through the `hostfs_*` getters.
         ///
         /// # Safety
@@ -398,7 +433,7 @@ macro_rules! status_export {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $name(path: *const u8, path_len: usize) -> i32 {
             let path = unsafe { str_input(path, path_len) };
-            with_run(|run| run.filesystem.$method(&mut run.results, path))
+            with_run(|run| bridge::$function(&run.filesystem, &mut run.results, path))
         }
     };
 }
@@ -427,7 +462,7 @@ pub unsafe extern "C" fn hostfs_write_bytes_to_file_new(
 ) -> i32 {
     let path = unsafe { str_input(path, path_len) };
     with_run(|run| {
-        run.filesystem.write_bytes_to_file_new(&mut run.results, path, || {
+        bridge::write_bytes_to_file_new(&run.filesystem, &mut run.results, path, || {
             if data_len == ABSENT {
                 Err(unsafe { str_input(error, error_len) }.to_owned())
             } else {
@@ -457,19 +492,29 @@ pub extern "C" fn hostfs_error_message() {
 
 // ----- Host Filesystem authorization for the async Filesystem Jobs -----
 
-/// `resource_len`: ABSENT = the handle is not a file Resource; NO_CANONICAL_PATH = a file
-/// without a canonical path; otherwise the canonical path recorded at open.
-unsafe fn resource_path(ptr: *const u8, len: usize) -> Option<Option<PathBuf>> {
+/// The Resource's grant (`Resource::file_grant`). `resource_len`: STDIO = a stdio
+/// Resource; NO_CANONICAL_PATH = a file without a recorded path; ABSENT = any other
+/// Resource (untracked); otherwise the canonical path recorded at open.
+unsafe fn grant(ptr: *const u8, len: usize) -> Grant {
     match len {
-        ABSENT => None,
-        NO_CANONICAL_PATH => Some(None),
-        _ => Some(Some(PathBuf::from(unsafe { os_input(ptr, len) }))),
+        STDIO => Grant::Stdio,
+        NO_CANONICAL_PATH => Grant::Opened(None),
+        ABSENT => Grant::Untracked,
+        _ => Grant::Opened(Some(PathBuf::from(unsafe { os_input(ptr, len) }))),
+    }
+}
+
+/// The saved path of a parent directory Resource (None when it has none).
+unsafe fn parent_path(ptr: *const u8, len: usize) -> Option<PathBuf> {
+    match len {
+        ABSENT | NO_CANONICAL_PATH | STDIO => None,
+        _ => Some(PathBuf::from(unsafe { os_input(ptr, len) })),
     }
 }
 
 /// `Job::check_policy` (see the `filesystem/job` stub). `kind`:
-/// 0 open(path, access=a, create_mode=b, append=c, stat mask=d),
-/// 1 fstatx / file_size / file_time(resource),
+/// 0 open(path, access=a, create_mode=b, stat mask=d),
+/// 1 fstatx(resource, stat mask=d) / file_size / file_time(resource, a=1: no mask),
 /// 2 statx / file_kind_by_path(parent = resource when a != 0, path, follow=b),
 /// 3 file_time_by_path(path, follow=b), 4 realpath / inotify_add_watch(path),
 /// 5 access(path, a), 6 chmod(path), 7 flock(resource, exclusive=a), 8 remove(path),
@@ -482,7 +527,7 @@ pub unsafe extern "C" fn policy_check_job(
     kind: i32,
     a: i32,
     b: i32,
-    c: i32,
+    _c: i32,
     d: u32,
     path: *const u8,
     path_len: usize,
@@ -492,11 +537,11 @@ pub unsafe extern "C" fn policy_check_job(
     resource_len: usize,
 ) -> i32 {
     let path = || unsafe { os_input(path, path_len) }.to_owned();
-    let file = || unsafe { resource_path(resource, resource_len) };
+    let file = || unsafe { grant(resource, resource_len) };
     let job = match kind {
-        0 => Job::open(path(), a, b, c != 0, d),
-        1 => Job::file_metadata(file()),
-        2 => Job::stat_path((a != 0).then(|| file().flatten()), path(), b != 0),
+        0 => Job::open(path(), a, b, d),
+        1 => Job::file_metadata(file(), (a == 0).then_some(d)),
+        2 => Job::stat_path((a != 0).then(|| unsafe { parent_path(resource, resource_len) }), path(), b != 0),
         3 => Job::file_time_by_path(path(), b != 0),
         4 => Job::path_metadata(path()),
         5 => Job::access(path(), a),
@@ -510,6 +555,47 @@ pub unsafe extern "C" fn policy_check_job(
     with_run(|run| host_code(job.check_policy(&run.filesystem)))
 }
 
+/// The HostFs authorization of a WASI path operation (`filesystem/job` stub
+/// `check_wasi`). `op`: 0 open file (read = a != 0, write = b != 0), 1 open directory,
+/// 2 read_link, 3 create_directory, 4 rename(path, path2), 5 remove_directory / unlink,
+/// 6 read_directory. `base` is the directory's path for 0, 1 and 5; `path` is the guest
+/// path for those and the resolved host path otherwise. 0 = allowed, 1 = denied (the
+/// denial line is printed), 2 = an I/O error while authorizing.
+///
+/// # Safety
+/// The buffers must come from `policy_alloc`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn policy_check_wasi(
+    op: i32,
+    a: i32,
+    b: i32,
+    base: *const u8,
+    base_len: usize,
+    path: *const u8,
+    path_len: usize,
+    path2: *const u8,
+    path2_len: usize,
+) -> i32 {
+    use crate::filesystem::WasiCheck;
+    let base = Path::new(unsafe { os_input(base, base_len) });
+    let path = unsafe { os_input(path, path_len) };
+    let path2 = unsafe { os_input(path2, path2_len) };
+    let check = match op {
+        0 => WasiCheck::OpenFileAt { base, path, read: a != 0, write: b != 0 },
+        1 => WasiCheck::OpenDirectoryAt { base, path },
+        2 => WasiCheck::ReadLink { host_path: path },
+        3 => WasiCheck::CreateDirectory { host_path: path },
+        4 => WasiCheck::Rename { old_host_path: path, new_host_path: path2 },
+        5 => WasiCheck::RemoveAt { base, path },
+        _ => WasiCheck::ReadDirectory { host_path: path },
+    };
+    with_run(|run| match crate::filesystem::check_wasi(&run.filesystem, check) {
+        Ok(()) => 0,
+        Err(crate::filesystem::FsError::Denied) => 1,
+        Err(crate::filesystem::FsError::Io(_)) => 2,
+    })
+}
+
 /// `HostFs::authorize_read` (TLS key/certificate files, SQLite databases).
 ///
 /// # Safety
@@ -517,7 +603,7 @@ pub unsafe extern "C" fn policy_check_job(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn policy_authorize_read(path: *const u8, len: usize) -> i32 {
     let path = unsafe { os_input(path, len) };
-    with_run(|run| host_code(run.filesystem.authorize_read(path)))
+    with_run(|run| host_code(run.filesystem.authorize_read(path).map_err(Into::into)))
 }
 
 /// `HostFs::authorize_write`.
@@ -527,7 +613,7 @@ pub unsafe extern "C" fn policy_authorize_read(path: *const u8, len: usize) -> i
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn policy_authorize_write(path: *const u8, len: usize) -> i32 {
     let path = unsafe { os_input(path, len) };
-    with_run(|run| host_code(run.filesystem.authorize_write(path)))
+    with_run(|run| host_code(run.filesystem.authorize_write(path).map_err(Into::into)))
 }
 
 // ----- SQLite (sqlite/policy.rs) -----

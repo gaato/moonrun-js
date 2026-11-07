@@ -1,3 +1,4 @@
+import type { WasiCheck } from '../../domains/policy/component.ts';
 import type { FileKind } from '../../ports/fs.ts';
 import type { HostError, Result } from '../../ports/result.ts';
 import type { ImportFamily } from '../context.ts';
@@ -12,6 +13,7 @@ import {
   FD_STDIN,
   FD_STDOUT,
   KNOWN_RIGHTS,
+  type ResolvedPath,
   RIGHT,
 } from './fds.ts';
 import { openFile } from './open.ts';
@@ -152,6 +154,21 @@ export const preview1: ImportFamily = (ctx) => {
 
   const check = <T>(r: Result<T, HostError>): T => (r.ok ? r.value : fail(fromHostError(r.error)));
 
+  /**
+   * HostFs's authorization of a WASI path operation (moonrun 0.1.20261104 routes WASI
+   * through HostFs; `fs_error_to_errno`: Denied is ACCES). Without an enforced policy
+   * HostFs checks nothing.
+   */
+  const authorize = (request: WasiCheck): void => {
+    const verdict = ctx.enforcedPolicy?.checkWasi(request) ?? 'allowed';
+    if (verdict === 'denied') {
+      fail(WasiErrno.ACCES);
+    }
+    if (verdict === 'io') {
+      fail(WasiErrno.IO);
+    }
+  };
+
   const stdioWrite = (fd: number, iovs: number, iovsLen: number): number => {
     let total = 0;
     for (let i = 0; i < iovsLen; i++) {
@@ -257,7 +274,7 @@ export const preview1: ImportFamily = (ctx) => {
       fail(WasiErrno.NOTCAPABLE);
     }
     const path = readPath(pathPtr, pathLen);
-    const { hostPath, boundaryRoot } = table.resolve(dirfd, path);
+    const { base, hostPath, boundaryRoot } = table.resolve(dirfd, path);
     enforceBoundary(files, boundaryRoot, hostPath, {
       kind: 'follow-final',
       allowMissingFinal: create,
@@ -271,18 +288,32 @@ export const preview1: ImportFamily = (ctx) => {
       if ((oflags & (OFLAG_CREAT | OFLAG_EXCL | OFLAG_TRUNC)) !== 0) {
         fail(WasiErrno.INVAL);
       }
+      authorize({ kind: 'open-directory', base, path });
       if (check(files.stat(hostPath)).kind !== 'dir') {
         fail(WasiErrno.NOTDIR);
       }
       fd = table.insert({ kind: 'dir', path: hostPath, ...rights });
     } else {
+      const wantsRead = (rightsBase & RIGHT.FD_READ) !== 0n;
+      const wantsWrite = (rightsBase & RIGHT.FD_WRITE) !== 0n;
+      const append = (fdflags & FDFLAG_APPEND) !== 0;
+      const createNew = (oflags & OFLAG_EXCL) !== 0;
+      const truncate = (oflags & OFLAG_TRUNC) !== 0;
+      // moonrun's `FileOpenOptions` and `open_file_at`'s intent from them.
+      authorize({
+        kind: 'open-file',
+        base,
+        path,
+        read: wantsRead || !wantsWrite,
+        write: wantsWrite || append || create || createNew || truncate,
+      });
       const hostFd = openFile(files, hostPath, {
-        read: (rightsBase & RIGHT.FD_READ) !== 0n,
-        write: (rightsBase & RIGHT.FD_WRITE) !== 0n,
-        append: (fdflags & FDFLAG_APPEND) !== 0,
+        read: wantsRead,
+        write: wantsWrite,
+        append,
         create,
-        createNew: (oflags & OFLAG_EXCL) !== 0,
-        truncate: (oflags & OFLAG_TRUNC) !== 0,
+        createNew,
+        truncate,
       });
       fd = table.insert({ kind: 'file', fd: hostFd, ...rights });
     }
@@ -292,7 +323,9 @@ export const preview1: ImportFamily = (ctx) => {
 
   const readdir = (fd: number, bufPtr: number, bufLen: number, cookie: bigint, usedPtr: number) => {
     table.requireRight(fd, RIGHT.FD_READDIR);
-    const listed = files.readDir(table.dirPath(fd));
+    const dirPath = table.dirPath(fd);
+    authorize({ kind: 'read-directory', hostPath: dirPath });
+    const listed = files.readDir(dirPath);
     if (!listed.ok) {
       fail(WasiErrno.IO);
     }
@@ -328,6 +361,7 @@ export const preview1: ImportFamily = (ctx) => {
   ) => {
     table.requireRight(dirfd, RIGHT.PATH_READLINK);
     const hostPath = resolveParentOnly(dirfd, readPath(pathPtr, pathLen));
+    authorize({ kind: 'read-link', hostPath });
     const target = check(files.readLink(hostPath));
     const out = memory.view(bufPtr, bufLen);
     const used = Math.min(out.length, target.length);
@@ -356,17 +390,35 @@ export const preview1: ImportFamily = (ctx) => {
     const to = table.resolve(newFd, newPath);
     enforceBoundary(files, from.boundaryRoot, from.hostPath, { kind: 'parent-only' });
     enforceBoundary(files, to.boundaryRoot, to.hostPath, { kind: 'parent-only' });
+    authorize({ kind: 'rename', from: from.hostPath, to: to.hostPath });
     check(files.rename(from.hostPath, to.hostPath));
   };
 
   /** create_directory / remove_directory / unlink_file share one shape. */
   const entryOp =
-    (right: bigint, op: (hostPath: string) => ReturnType<typeof files.rmdir>) =>
+    (
+      right: bigint,
+      request: (resolved: ResolvedPath, path: string) => WasiCheck,
+      op: (hostPath: string) => ReturnType<typeof files.rmdir>,
+    ) =>
     (dirfd: number, pathPtr: number, pathLen: number): number =>
       withMemory(() => {
         table.requireRight(dirfd, right);
-        check(op(resolveParentOnly(dirfd, entryPath(pathPtr, pathLen))));
+        const path = entryPath(pathPtr, pathLen);
+        const resolved = table.resolve(dirfd, path);
+        enforceBoundary(files, resolved.boundaryRoot, resolved.hostPath, { kind: 'parent-only' });
+        authorize(request(resolved, path));
+        check(op(resolved.hostPath));
       });
+  const createDirectory = ({ hostPath }: ResolvedPath): WasiCheck => ({
+    kind: 'create-directory',
+    hostPath,
+  });
+  const removeAt = ({ base }: ResolvedPath, path: string): WasiCheck => ({
+    kind: 'remove-at',
+    base,
+    path,
+  });
 
   return {
     args_get: fn(['u32', 'u32'], 'i32', (argvPtr, bufPtr) =>
@@ -455,17 +507,17 @@ export const preview1: ImportFamily = (ctx) => {
     path_create_directory: fn(
       ['i32', 'u32', 'u32'],
       'i32',
-      entryOp(RIGHT.PATH_CREATE_DIRECTORY, (p) => files.mkdir(p)),
+      entryOp(RIGHT.PATH_CREATE_DIRECTORY, createDirectory, (p) => files.mkdir(p)),
     ),
     path_remove_directory: fn(
       ['i32', 'u32', 'u32'],
       'i32',
-      entryOp(RIGHT.PATH_REMOVE_DIRECTORY, (p) => files.rmdir(p)),
+      entryOp(RIGHT.PATH_REMOVE_DIRECTORY, removeAt, (p) => files.rmdir(p)),
     ),
     path_unlink_file: fn(
       ['i32', 'u32', 'u32'],
       'i32',
-      entryOp(RIGHT.PATH_UNLINK_FILE, (p) => files.unlink(p)),
+      entryOp(RIGHT.PATH_UNLINK_FILE, removeAt, (p) => files.unlink(p)),
     ),
     // Codes that do not fit in i32 become 1 (`i32::try_from(code).unwrap_or(1)`).
     proc_exit: fn(['u32'], 'void', (code) => requestExit(ctx, code > 0x7fff_ffff ? 1 : code)),

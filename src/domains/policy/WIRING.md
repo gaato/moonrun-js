@@ -3,7 +3,8 @@
 Reference: moon at the `upstream/moon` pin, `crates/moonrun/src` (paths below are relative to it).
 The decisions, the error texts and the denial lines are upstream's own code: `PolicyComponent`
 (component.ts) wraps the moonrun-policy wasm (crates/moonrun-policy: `policy/**`,
-`runtime/environment*.rs`, `runtime/working_directory.rs`, `filesystem/mod.rs`). One instance
+`runtime/environment*.rs`, `runtime/working_directory.rs`, `filesystem/{mod,grant,host}.rs`,
+`unstable_api/filesystem.rs`). One instance
 serves one Run. The component reaches the OS only through the capabilities it is built with
 (`abi/os-capabilities.ts` over the run's ports), and prints `Sandbox policy blocked …` itself,
 synchronously, through the run's stderr port (moonrun's `eprintln!`, `policy/mod.rs:54-61`).
@@ -11,16 +12,22 @@ What remains here is *where* each check is consulted.
 
 ## 1. Startup (hosts/node/cli.ts, engine/run.ts)
 
-moonrun order (`main.rs:94-120`, `runtime/mod.rs:134-160`):
+moonrun order (`main.rs`, `engine.rs` `with_policy_file_source_dir`, `runtime/mod.rs`
+`RuntimeConfig::realize_policy` / `Runtime::new`):
 
 1. Before argument parsing: `takeInheritedPolicy(process.env)` (hosts/node/policy-loader.ts,
    the OS half of `moonutil::policy_transport`). It deletes `MOONRUN_INHERITED_POLICY` first, so
    `env.from_host = "*"` and children never see it. Its failures are bare chains.
-2. clap parses the command line (moonrun-cli). The module is compiled (its errors win).
-3. An inherited policy wins and `--policy` is ignored: `policy.loadInherited(bytes)`, else
-   `policy.loadFile(path, sourceDir)`. Failures are anyhow chains with runtime/mod.rs's context
-   first; print with `formatErrorChain` and exit 1. No policy means unrestricted.
-4. `run(loaded, host, { policy })`: with an enforced policy the run's `EnvPort` is
+2. clap parses the command line (moonrun-cli, `cli_support.rs`).
+3. `--policy` is read and resolved before the Wasm is loaded: `policy.select(path, sourceDir)`.
+   It also reports `process.virtualize` / `process.ipc`; with `--virtual-process` / `--daemon`
+   these request moonrun's V8 execution sessions, which moonrun-js refuses with an error.
+4. The module is loaded and compiled (its errors win over the composition below).
+5. `policy.realize(inherited)`: the inherited restriction transfer intersected with the selected
+   policy, and Env provisioned from the ambient environment (an owned snapshot of it under an
+   inherited transfer). Failures are anyhow chains with runtime/mod.rs's context first; print
+   with `formatErrorChain` and exit 1. No policy means unrestricted.
+6. `run(loaded, host, { policy })`: with an enforced policy the run's `EnvPort` is
    `policy.env()` (the provisioned `Env`; children get exactly these entries), and the Async Host
    gets `authorizeFilesystem` / `authorizeNetwork` / `recordResolved` (abi/async `PolicySeams`).
    Without one, the legacy filesystem imports instantiate an unchecked component on first use
@@ -46,10 +53,12 @@ pass `undefined` for a non-`Uint8Array` so that the component decodes after auth
 
 ### 3.2 Async filesystem Jobs (`kernel/fs-jobs.ts` via `authorizeFilesystem`)
 
-`policy.checkJob(payload)` is upstream `Job::check_policy` (`filesystem/job/mod.rs:423-473`),
-mirrored by the component's `filesystem/job` stub over `HostFs`'s private checks. fd-based Jobs
-use `HostFile.canonicalPath`, the best-effort `realpath` taken right after the open (upstream
-`std::fs::canonicalize(filename).ok()` in the open Job); a handle that is not a file is EBADF.
+`policy.checkJob(payload)` is upstream `Job::check_policy` (`filesystem/job/mod.rs`),
+mirrored by the component's `filesystem/job` stub over `HostFs`'s checks. fd-based Jobs pass the
+Resource's `FileGrant`: stdio is `FileGrant::STDIO` (always allowed), a file opened by path is
+`FileGrant::from_opened_path` of `HostFile.canonicalPath` (the `realpath` taken right after the
+open), and any other Resource is `FileGrant::UNTRACKED`. A parent directory handle contributes its
+saved path in place of upstream's OS lookup of the handle's current path.
 
 Other filesystem consumers:
 

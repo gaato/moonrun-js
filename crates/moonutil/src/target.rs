@@ -15,6 +15,12 @@ impl TargetBackend {
         &[Self::Wasm, Self::WasmGC, Self::Js, Self::Native, Self::LLVM]
     }
 
+    /// moonutil `TargetBackend::matches_file_target` (moon 940aa18), verbatim: native
+    /// file conditions also apply to LLVM; LLVM conditions remain LLVM-only.
+    pub fn matches_file_target(self, file_target: Self) -> bool {
+        self == file_target || matches!((self, file_target), (Self::LLVM, Self::Native))
+    }
+
     pub fn to_flag(self) -> &'static str {
         match self {
             Self::Wasm => "wasm",

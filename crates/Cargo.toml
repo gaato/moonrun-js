@@ -21,6 +21,8 @@ publish = false
 [workspace.dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.4", features = ["derive", "string", "env"] }
+dunce = "1.0.4"
+globset = "0.4"
 indexmap = { version = "2", features = ["serde"] }
 logos = "0.15.1"
 regex = "1"
