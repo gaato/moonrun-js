@@ -2,8 +2,20 @@ import { createHash } from 'node:crypto';
 
 /** D12: sort result records inside each protocol block as well as the blocks. */
 export function unorderedResults(stdout: string): string {
-  const records: string[] = [];
+  // Concurrent upstream helper builds print these complete summaries in
+  // completion order. Preserve their exact paths and multiplicity, like results.
+  // They share the runner's stdout, so one can also land between a protocol
+  // block's lines; take them out before the blocks are parsed.
+  const artifacts: string[] = [];
   let rest = stdout.replace(
+    /^Artifacts:\n {2}moonbitlang\/async_test_programs\/[^\s]+ {2}native {2}<root>\/_build\/test_programs\/native\/debug\/build\/moonbitlang\/async_test_programs\/[^\n]+\n/gm,
+    (block) => {
+      artifacts.push(block);
+      return '';
+    },
+  );
+  const records: string[] = [];
+  rest = rest.replace(
     /----- BEGIN MOON TEST RESULT -----\n([\s\S]*?)\n----- END MOON TEST RESULT -----\n/g,
     (block, body: string) => {
       const lines = body.split('\n');
@@ -25,16 +37,6 @@ export function unorderedResults(stdout: string): string {
       )
         return block;
       records.push(...lines);
-      return '';
-    },
-  );
-  // Concurrent upstream helper builds print these complete summaries in
-  // completion order. Preserve their exact paths and multiplicity, like results.
-  const artifacts: string[] = [];
-  rest = rest.replace(
-    /^Artifacts:\n {2}moonbitlang\/async_test_programs\/[^\s]+ {2}native {2}<root>\/_build\/test_programs\/native\/debug\/build\/moonbitlang\/async_test_programs\/[^\n]+\n/gm,
-    (block) => {
-      artifacts.push(block);
       return '';
     },
   );

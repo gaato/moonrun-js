@@ -24,6 +24,11 @@ describe('suite comparisons', () => {
     expect(unorderedResults(a + a)).not.toBe(unorderedResults(a));
     expect(unorderedResults(a + b)).not.toBe(unorderedResults(a + artifact('sleep')));
     expect(unorderedResults('hello\nworld\n')).not.toBe(unorderedResults('world\nhello\n'));
+    // A helper's summary written between the lines of the runner's protocol block.
+    const record = '{"type":"result","file":"run_test.mbt","index":0,"message":""}';
+    const split = `----- BEGIN MOON TEST RESULT -----\n${a}${record}\n----- END MOON TEST RESULT -----\n`;
+    expect(unorderedResults(split)).toBe(unorderedResults(a + block([record])));
+    expect(unorderedResults(split)).not.toBe(unorderedResults(block([record])));
   });
 
   it('sorts records within protocol blocks, preserving multiplicity and other output', () => {

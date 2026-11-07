@@ -293,7 +293,10 @@ for (const [k, r] of ref) {
       } else if (!sameText(r.stdout, accepted.stdout)) {
         // Name the tests that remain after the expected differences were accepted.
         const records = recordDifferences(r.stdout, accepted.stdout);
-        unexpected.push(records === '' ? difference : { ...difference, detail: records });
+        const rest = unordered
+          ? `after D12: ${firstDifference(unorderedResults(r.stdout), unorderedResults(accepted.stdout))}`
+          : detail;
+        unexpected.push({ ...difference, detail: records === '' ? rest : records });
       }
     }
   }

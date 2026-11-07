@@ -73,7 +73,7 @@ P6 の測定上の注意:
   重なる。ローカルの単独実行では Deno だけが index 0 / 2 を各約半数で落とし、Node と
   native は 0 件。index 2 を別の flaky 項目として登録した。
 
-- D12: `--unordered` は protocol block 同士だけでなく、その中の result / start JSON 行も多重集合として比較する。重複・message は保持する。signal の index 0 / 1 の入れ替わりを許すが、合否や出力を消さない。並行した helper build の `Artifacts:` と `moonbitlang/async_test_programs/*` の完全な出力も、名前・パス・個数を保持して並べる。それ以外の protocol 外の出力は順序も保持する。helper の完了順は runner の相違ではないため。
+- D12: `--unordered` は protocol block 同士だけでなく、その中の result / start JSON 行も多重集合として比較する。重複・message は保持する。signal の index 0 / 1 の入れ替わりを許すが、合否や出力を消さない。並行した helper build の `Artifacts:` と `moonbitlang/async_test_programs/*` の完全な出力も、名前・パス・個数を保持して並べる。helper は runner と stdout を共有するので、この出力が protocol block の行の間に入った場合も先に取り出してから block を読む。それ以外の protocol 外の出力は順序も保持する。helper の完了順は runner の相違ではないため。
 - shell の warning の書き手は `src/shell/progs_for_test.mbt` の遅延初期化から並行起動する `moon build test_programs/{cat,sleep,dump_env,filter}`。同じ stderr に parser が warning を複数 write していた。suite は helper を事前 build し、nested moon の出力を子ごとに完全に捕捉してから転送する。warning のフィルタは無い。stdout・stderr・非ゼロ exit の転送を回帰テストで確認し、Node 全 async は **27/27、546/546 を 3 回連続**で観測した。
 - Deno の watcher は inode ごとに共有し、`/proc/self/fd` 経由で監視する。移動時には現在のパスで再登録する（D17）。公開 API の mtime 精度（D39）、通知の合流・遅延、再登録の隙間があるため、単独の fs 50/50 だけでは安定した一致と数えない。FFI 撤去後の全 async 3 回では watcher テストは全成功、ctime だけが 1 回失敗した（D39）。成功テスト数は 540 → 541 → 541 / 546、socket の 5 失敗は各回で同じ。
 - suite の旧 43 invocation は、外側の 27 wasm 呼び出しに子 runner の記録が混ざった値。同じ argv・異なる stdin の子の記録を上書きし、キャンセルのタイミングでも件数が変わっていた。P6 では外側の 27 呼び出しだけを比較する。子の観測可能な出力は親の stdout/stderr とゲストの検査に含まれ、比較対象から消えていない。
