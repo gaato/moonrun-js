@@ -115,6 +115,10 @@ function checkout(): string {
         filter: (src) => !src.includes(`${path.sep}_build`),
       });
     }
+    // core/async's tests create their files under `_build/` of the working directory,
+    // which `moon test` leaves in place; --target-dir builds elsewhere. Without it the
+    // first runner fails until a test happens to create it.
+    mkdirSync(path.join(dir, '_build'), { recursive: true });
     return dir;
   }
   return path.resolve(suite ?? '.');
@@ -211,13 +215,16 @@ writeFileSync(
   `#!/bin/sh\nexec node ${quote(path.join(repoRoot, 'scripts/record-shim.ts'))} --nested-moon ${quote(moon)} "$@"\n`,
   { mode: 0o755 },
 );
-if (suite === 'async') {
+if (suite === 'async' || suite === 'core') {
   // The checkout normally lives inside our type=module package. Upstream's
-  // Node helpers are CommonJS and must keep their standalone-repository scope.
+  // Node helpers (async's, and core/async's since it moved there) are CommonJS
+  // and must keep their standalone-repository scope.
   const packageJson = path.join(project, 'package.json');
   if (!existsSync(packageJson)) {
     writeFileSync(packageJson, '{"private":true,"type":"commonjs"}\n');
   }
+}
+if (suite === 'async') {
   const programs = path.join(project, 'test_programs');
   for (const entry of readdirSync(programs, { withFileTypes: true })) {
     if (entry.isDirectory() && existsSync(path.join(programs, entry.name, 'moon.pkg'))) {
