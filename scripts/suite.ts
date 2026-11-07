@@ -4,6 +4,9 @@
 //
 //   node scripts/suite.ts <async|core|x|path> [--target wasm|wasm-gc] [-p <pkg>]... [--refresh-ref] [--unordered] [--runtime node|deno|bun]
 //
+// --only <dir> / --exclude <dir> select the packages under (or outside) a directory of
+// the project, e.g. `core --only async`; --jobs <n> passes `-j <n>` to `moon test`.
+//
 // Optional: --expected-differences <json> overrides test/conformance/expected-differences.json.
 // Reports go to .cache/reports/<suite>-<target>.json.
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -44,7 +47,7 @@ const argv = process.argv.slice(2);
 const suite = argv[0];
 if (suite === undefined) {
   console.error(
-    'usage: node scripts/suite.ts <async|core|x|path> [--target t] [-p pkg]... [--refresh-ref]',
+    'usage: node scripts/suite.ts <async|core|x|path> [--target t] [-p pkg]... [--only dir] [--exclude dir] [--jobs n] [--refresh-ref]',
   );
   process.exit(2);
 }
@@ -53,7 +56,10 @@ const option = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const target = option('--target') ?? 'wasm';
-const packages = argv.flatMap((a, i) => (a === '-p' ? [argv[i + 1] ?? ''] : []));
+const explicitPackages = argv.flatMap((a, i) => (a === '-p' ? [argv[i + 1] ?? ''] : []));
+const only = option('--only');
+const exclude = option('--exclude');
+const jobs = option('--jobs');
 const refreshRef = argv.includes('--refresh-ref');
 // D12: concurrent async tests finish in timing order, even under the real moonrun.
 const unordered = argv.includes('--unordered');
@@ -76,18 +82,6 @@ validateExpectedDifferences(
   expectations,
   readFileSync(path.join(repoRoot, 'docs/divergences.md'), 'utf8'),
 );
-const expected = (expectations[runtime] ?? []).filter(
-  (entry) =>
-    entry.suite === suite &&
-    entry.fingerprints[target] !== undefined &&
-    (packages.length === 0 ||
-      packages.includes(
-        suite === 'core'
-          ? `moonbitlang/core/${path.posix.dirname(entry.invocation)}`
-          : path.posix.dirname(entry.invocation),
-      )),
-);
-
 function checkout(): string {
   // The bundled core changes with moonc. A fixed `core/` directory silently
   // keeps testing the previous toolchain's sources after an upgrade.
@@ -142,6 +136,7 @@ function record(project: string, runner: string, out: string, build: string): vo
     '--target-dir',
     build,
     ...packages.flatMap((p) => ['-p', p]),
+    ...(jobs === undefined ? [] : ['-j', jobs]),
   ];
   const started = Date.now();
   const result = spawnSync(moon, args, {
@@ -203,8 +198,57 @@ function firstDifference(a: string, b: string): string {
   return '';
 }
 
+/**
+ * The packages `moon test` tests by default whose directory is `only` or under it (all
+ * when undefined), except those under `exclude`. Asking moon, not reading moon.pkg
+ * files, keeps its target filtering, so complementary selections add up to the full run.
+ */
+function selectPackages(project: string, only?: string, exclude?: string): string[] {
+  // `moon.mod` (name = "…") replaced moon.mod.json; accept either.
+  const modFile = path.join(project, 'moon.mod');
+  const module = existsSync(modFile)
+    ? (/^name\s*=\s*"([^"]+)"/m.exec(readFileSync(modFile, 'utf8'))?.[1] ?? '')
+    : (JSON.parse(readFileSync(path.join(project, 'moon.mod.json'), 'utf8')) as { name: string })
+        .name;
+  const plan = execFileSync(
+    moon,
+    ['test', '--target', target, '--target-dir', path.join(cache, 'build', 'dry-run'), '--dry-run'],
+    { cwd: project, encoding: 'utf8', maxBuffer: 1 << 30 },
+  );
+  const under = (pkg: string, dir: string): boolean => {
+    const prefix = `${module}/${path.posix.normalize(dir)}`;
+    return pkg === prefix || pkg.startsWith(`${prefix}/`);
+  };
+  return [...new Set([...plan.matchAll(/--pkg-name (\S+)/g)].map((match) => match[1] ?? ''))]
+    .filter(
+      (pkg) =>
+        (only === undefined || under(pkg, only)) && !(exclude !== undefined && under(pkg, exclude)),
+    )
+    .sort();
+}
+
 const project = checkout();
 const moon = execFileSync('which', ['moon'], { encoding: 'utf8' }).trim();
+const packages =
+  only === undefined && exclude === undefined
+    ? explicitPackages
+    : [...explicitPackages, ...selectPackages(project, only, exclude)];
+if ((only !== undefined || exclude !== undefined) && packages.length === 0) {
+  console.error(`no packages selected by --only ${only ?? ''} --exclude ${exclude ?? ''}`);
+  process.exit(2);
+}
+const expected = (expectations[runtime] ?? []).filter(
+  (entry) =>
+    entry.suite === suite &&
+    entry.fingerprints[target] !== undefined &&
+    (packages.length === 0 ||
+      packages.includes(
+        suite === 'core'
+          ? `moonbitlang/core/${path.posix.dirname(entry.invocation)}`
+          : path.posix.dirname(entry.invocation),
+      )),
+);
+
 const nestedBin = path.join(cache, 'suite-bin');
 mkdirSync(nestedBin, { recursive: true });
 const quote = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
@@ -277,7 +321,7 @@ for (const [k, r] of ref) {
     j.stdout,
     expected.filter((entry) => entry.invocation === invocation),
     target,
-    { reference: r.stderr, actual: j.stderr },
+    { reference: r.stderr, actual: j.stderr, root: project },
   );
   for (const entry of accepted.matched) matched.add(entry);
   const sameText = (a: string, b: string): boolean =>
@@ -297,7 +341,7 @@ for (const [k, r] of ref) {
       const difference = { argv: r.argv, field, detail };
       mismatches.push(difference);
       if (field !== 'stdout') {
-        // A matched D16 entry may record exactly this stderr (stderrReports).
+        // A matched D16 entry may accept this stderr (stderrVocabulary).
         if (!(field === 'stderr' && accepted.stderrMatched)) unexpected.push(difference);
       } else if (!sameText(r.stdout, accepted.stdout)) {
         // Name the tests that remain after the expected differences were accepted.

@@ -83,41 +83,62 @@ const entry = (divergence = 'D33'): ExpectedDifference => ({
 });
 
 describe('expected suite differences', () => {
-  it('accepts a D16 stderr only as interleaved copies of its exact reports, only for D16', () => {
-    const one = 'PanicError\n    at helper (<root>/main.mbt:61)\n';
-    const two = 'PanicError\n    at helper (<root>/main.mbt:61)\n    at other (<root>/x.mbt:1)\n';
-    const lock = { ...entry('D16'), stderrReports: { wasm: [one, two] } };
+  it('accepts a D16 stderr only as pieces of its vocabulary lines, only for D16', () => {
+    const panic = 'PanicError\n';
+    const helper = '    at helper (<root>/main.mbt:61)\n';
+    const other = '    at other (<root>/x.mbt:1)\n';
+    const lock = { ...entry('D16'), stderrVocabulary: { wasm: [panic, helper, other] } };
+    const root = '/work/core';
     const run = (actualStderr: string, referenceStderr = '') =>
       matchExpectedDifferences(block([reference]), block([failure]), [lock], 'wasm', {
         reference: referenceStderr,
         actual: actualStderr,
+        root,
       });
-    expect(run(one)).toMatchObject({ matched: [lock], stderrMatched: true });
-    // Any number of reports, any mix, interleaved even mid-line.
-    expect(run(one + two + one).stderrMatched).toBe(true);
-    expect(run(`${one.slice(0, 15)}${two}${one.slice(15)}`).stderrMatched).toBe(true);
-    // Anything else fails the whole entry: other bytes, a partial report, no stderr.
-    expect(run(`${one}x`).matched).toEqual([]);
-    expect(run(one.slice(1)).matched).toEqual([]);
+    expect(run(panic + helper)).toMatchObject({ matched: [lock], stderrMatched: true });
+    // Any number and order of lines; a line split around other writers' lines.
+    expect(run(panic + panic + helper + other + helper).stderrMatched).toBe(true);
+    expect(run(`${helper.slice(0, 9)}${panic}${other}${helper.slice(9)}`).stderrMatched).toBe(true);
+    // Two open lines at once, one in three pieces.
+    expect(
+      run(
+        `${helper.slice(0, 5)}${other.slice(0, 12)}${helper.slice(5, 12)}${other.slice(12)}${helper.slice(12)}`,
+      ).stderrMatched,
+    ).toBe(true);
+    // A split project path escapes the <root> normalization; compare the raw paths.
+    const raw = helper.replace('<root>', root);
+    expect(run(`${raw.slice(0, 16)}${panic}${raw.slice(16)}`).stderrMatched).toBe(true);
+    // Pieces of one physical line must spell one vocabulary line.
+    expect(run(`${helper.slice(0, 9)}${other.slice(9)}`).matched).toEqual([]);
+    // Anything else fails the whole entry: other text, an unfinished line, no stderr.
+    expect(run(`${panic}x\n`).matched).toEqual([]);
+    expect(run(`${panic}${helper.slice(0, -1)}`).matched).toEqual([]);
+    expect(run(helper.replace('<root>', '/elsewhere')).matched).toEqual([]);
     expect(run('').matched).toEqual([]);
-    expect(run(one, 'reference output').matched).toEqual([]);
+    expect(run(panic, 'reference output').matched).toEqual([]);
     const docs = '| D16 | locks |\n| D33 | TTL |';
     expect(() => validateExpectedDifferences({ node: [lock] }, docs)).not.toThrow();
     expect(() =>
-      validateExpectedDifferences({ node: [{ ...entry(), stderrReports: { wasm: [one] } }] }, docs),
+      validateExpectedDifferences(
+        { node: [{ ...entry(), stderrVocabulary: { wasm: [panic] } }] },
+        docs,
+      ),
     ).toThrow('Only D16');
     expect(() =>
       validateExpectedDifferences(
-        { node: [{ ...lock, stderrReports: { 'wasm-gc': [one] } }] },
+        { node: [{ ...lock, stderrReports: { wasm: [panic] } } as ExpectedDifference] },
         docs,
       ),
-    ).toThrow('Invalid stderr reports');
-    expect(() =>
-      validateExpectedDifferences(
-        { node: [{ ...lock, stderrReports: { wasm: [one, one] } }] },
-        docs,
-      ),
-    ).toThrow('Invalid stderr reports');
+    ).toThrow('Unknown expected-difference field: stderrReports');
+    for (const bad of [
+      { 'wasm-gc': [panic] },
+      { wasm: [panic, panic] },
+      { wasm: [panic + helper] },
+    ]) {
+      expect(() =>
+        validateExpectedDifferences({ node: [{ ...lock, stderrVocabulary: bad }] }, docs),
+      ).toThrow('Invalid stderr vocabulary');
+    }
   });
 
   it('matches exact test identities and messages, preserving raw unrelated output', () => {

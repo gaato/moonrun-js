@@ -63,9 +63,16 @@ jobs:
           echo "$toolchain/bin" >> "$GITHUB_PATH"
           echo "MOONRUN_REFERENCE=$toolchain/bin/moonrun" >> "$GITHUB_ENV"
       - run: mise exec -- pnpm install --frozen-lockfile
-      - run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm --unordered --runtime ${{ matrix.runtime }}
+      # core/async runs as its own step with fewer concurrent test executables: its
+      # socket and timer tests depend on timing and can miss their deadlines while the
+      # rest of core's test processes run beside them. The comparison stays exact.
+      - run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm --unordered --exclude async --runtime ${{ matrix.runtime }}
       - if: always() && !cancelled()
-        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm-gc --unordered --runtime ${{ matrix.runtime }}
+        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm --unordered --only async --jobs 2 --runtime ${{ matrix.runtime }}
+      - if: always() && !cancelled()
+        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm-gc --unordered --exclude async --runtime ${{ matrix.runtime }}
+      - if: always() && !cancelled()
+        run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts core --target wasm-gc --unordered --only async --jobs 2 --runtime ${{ matrix.runtime }}
       - if: always() && !cancelled()
         run: mise exec node@${{ matrix.node }} -- node scripts/suite.ts async --target wasm --unordered --runtime ${{ matrix.runtime }}
       - if: always() && !cancelled()

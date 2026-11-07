@@ -74,12 +74,14 @@ export interface ExpectedDifference {
   /** Fingerprint per target; absent targets are outside this entry's scope. */
   readonly fingerprints: Readonly<Record<string, string>>;
   /**
-   * Per target, the exact panic reports this divergence makes its aborted helpers write:
-   * the reference stderr is empty and the actual one is an interleaving of copies of
-   * them (`stderrOfReports`). Only D16 may declare them: its failed lock tests abort
-   * their native helpers, which report on the inherited stderr.
+   * Per target, the exact stderr lines (each ending in `\n`, paths under the project
+   * shown as `<root>`) that this divergence makes its aborted helpers write. The
+   * reference stderr must be empty and the actual one made only of these lines,
+   * possibly split into pieces by the other helpers' writes (`stderrOfVocabulary`).
+   * Only D16 may declare them: its failed lock tests abort their native helpers,
+   * which report on the inherited stderr.
    */
-  readonly stderrReports?: Readonly<Record<string, readonly string[]>>;
+  readonly stderrVocabulary?: Readonly<Record<string, readonly string[]>>;
   readonly flaky?: boolean;
 }
 export type ExpectedDifferences = Readonly<Record<string, readonly ExpectedDifference[]>>;
@@ -101,6 +103,17 @@ const D39_FLAKY_INVOCATIONS = [
   JSON.stringify(['core', 'async/fs/fs.blackbox_test.wasm']),
 ];
 
+/** A field this checker does not know, such as a renamed one, would otherwise be ignored. */
+const ENTRY_FIELDS = [
+  'suite',
+  'invocation',
+  'divergence',
+  'tests',
+  'fingerprints',
+  'stderrVocabulary',
+  'flaky',
+];
+
 export function validateExpectedDifferences(
   list: ExpectedDifferences,
   documentation: string,
@@ -112,6 +125,8 @@ export function validateExpectedDifferences(
     for (const entry of entries) {
       if (!ids.has(entry.divergence))
         throw new Error(`Undocumented divergence: ${entry.divergence}`);
+      const unknown = Object.keys(entry).filter((key) => !ENTRY_FIELDS.includes(key));
+      if (unknown.length > 0) throw new Error(`Unknown expected-difference field: ${unknown[0]}`);
       if (!entry.invocation.endsWith('.wasm') || !['core', 'async'].includes(entry.suite))
         throw new Error('Expected difference needs a suite and wasm invocation');
       if (
@@ -123,18 +138,18 @@ export function validateExpectedDifferences(
           !D39_FLAKY_TESTS.includes(JSON.stringify(entry.tests)))
       )
         throw new Error('Only the D39 ctime tests may be flaky');
-      if (entry.stderrReports !== undefined) {
+      if (entry.stderrVocabulary !== undefined) {
         if (entry.divergence !== 'D16') {
           throw new Error('Only D16 may record a stderr difference');
         }
-        for (const [target, reports] of Object.entries(entry.stderrReports)) {
+        for (const [target, lines] of Object.entries(entry.stderrVocabulary)) {
           if (
             entry.fingerprints[target] === undefined ||
-            reports.length === 0 ||
-            new Set(reports).size !== reports.length ||
-            reports.some((report) => !report.endsWith('\n'))
+            lines.length === 0 ||
+            new Set(lines).size !== lines.length ||
+            lines.some((line) => !line.endsWith('\n') || line.indexOf('\n') !== line.length - 1)
           ) {
-            throw new Error('Invalid stderr reports');
+            throw new Error('Invalid stderr vocabulary');
           }
         }
       }
@@ -215,43 +230,73 @@ export function differenceFingerprint(
     .digest('hex');
 }
 
-/** At most this many aborted helper reports in one invocation's stderr. */
-const MAX_STDERR_REPORTS = 32;
+/** At most this many lines may be open (started, not finished) at once: one per helper. */
+const MAX_OPEN_LINES = 32;
+/** Search steps after which a stderr is rejected rather than decided. */
+const MAX_STDERR_STEPS = 200_000;
 
 /**
- * Whether `stderr` is some interleaving of copies of these exact reports (at least one).
- * D16's failed lock tests abort several native helpers at once; each writes one of a few
- * fixed panic reports, and their writes interleave on the shared stderr, even mid-line.
- * Which reports, how many, and the order vary per run; the bytes of each do not, so the
- * byte counts of `stderr` must be exactly a sum of the reports' byte counts.
+ * Whether `stderr` consists only of lines of `vocabulary`, where concurrent writers may
+ * split a line into pieces around other writers' output (D16).
+ *
+ * D16's failed lock tests abort several native helpers at once. How many helpers, which
+ * stack each reports, and how their writes interleave on the shared stderr vary per run,
+ * even within a line, so the stderr cannot be recorded exactly. Instead, `stderr` is
+ * read left to right as pieces: each piece either starts a line of `vocabulary` or
+ * continues a line that an earlier piece started and that is still open, and the
+ * pieces of one line, in order, must spell exactly one vocabulary line. At the end no
+ * line may be open. `root` replaces `<root>` in both texts first: a helper's write can
+ * split the project path, which `<root>` normalization then misses.
  */
-export function stderrOfReports(stderr: string, reports: readonly string[]): boolean {
-  const histogram = (text: string): number[] => {
-    const counts = new Array<number>(256).fill(0);
-    for (const byte of Buffer.from(text)) counts[byte] = (counts[byte] ?? 0) + 1;
-    return counts;
+export function stderrOfVocabulary(
+  stderr: string,
+  vocabulary: readonly string[],
+  root: string,
+): boolean {
+  const text = stderr.replaceAll('<root>', root);
+  const lines = [...new Set(vocabulary.map((line) => line.replaceAll('<root>', root)))];
+  if (text === '' || !text.endsWith('\n') || lines.length === 0) return false;
+  /** The longest piece at `pos` that extends the open `prefix` to a prefix of some line. */
+  const longest = (prefix: string, pos: number): number => {
+    let best = 0;
+    for (const line of lines) {
+      if (!line.startsWith(prefix)) continue;
+      let k = 0;
+      while (prefix.length + k < line.length && text[pos + k] === line[prefix.length + k]) k++;
+      best = Math.max(best, k);
+    }
+    return best;
   };
-  const target = histogram(stderr);
-  const parts = reports.map(histogram);
-  const search = (rest: number[], index: number, used: number): boolean => {
-    if (rest.every((n) => n === 0)) return used > 0;
-    const part = parts[index];
-    if (part === undefined || used >= MAX_STDERR_REPORTS) return false;
-    // Try every count of this report, most first, then the remaining reports.
-    let copies = 0;
-    const current = [...rest];
-    const states: number[][] = [[...current]];
-    while (copies + used < MAX_STDERR_REPORTS && part.every((n, i) => (current[i] ?? 0) >= n)) {
-      for (let i = 0; i < 256; i++) current[i] = (current[i] ?? 0) - (part[i] ?? 0);
-      copies++;
-      states.push([...current]);
+  const isLine = new Set(lines);
+  const failed = new Set<string>();
+  let steps = 0;
+  const search = (pos: number, open: readonly string[]): boolean => {
+    if (pos === text.length) return open.length === 0;
+    if (++steps > MAX_STDERR_STEPS) return false;
+    const key = `${pos}\0${open.join('\0')}`;
+    if (failed.has(key)) return false;
+    // Continue an open line (each distinct one once), or start a new one.
+    const candidates: Array<{ prefix: string; index: number }> = [
+      ...[...new Set(open)].map((prefix) => ({ prefix, index: open.indexOf(prefix) })),
+      ...(open.length < MAX_OPEN_LINES ? [{ prefix: '', index: -1 }] : []),
+    ];
+    const tries = candidates
+      .map((c) => ({ ...c, max: longest(c.prefix, pos) }))
+      .filter((c) => c.max > 0)
+      .sort((a, b) => b.max - a.max);
+    for (const { prefix, index, max } of tries) {
+      for (let k = max; k >= 1; k--) {
+        const grown = prefix + text.slice(pos, pos + k);
+        const rest = index < 0 ? [...open] : open.filter((_, i) => i !== index);
+        const next = isLine.has(grown) ? rest : [...rest, grown].sort();
+        if (search(pos + k, next)) return true;
+        if (steps > MAX_STDERR_STEPS) return false;
+      }
     }
-    for (let k = copies; k >= 0; k--) {
-      if (search(states[k] ?? [], index + 1, used + k)) return true;
-    }
+    failed.add(key);
     return false;
   };
-  return reports.length > 0 && search(target, 0, 0);
+  return search(0, []);
 }
 
 export function matchExpectedDifferences(
@@ -259,7 +304,7 @@ export function matchExpectedDifferences(
   actual: string,
   entries: readonly ExpectedDifference[],
   target: string,
-  stderr?: { readonly reference: string; readonly actual: string },
+  stderr?: { readonly reference: string; readonly actual: string; readonly root: string },
 ): { stdout: string; matched: ExpectedDifference[]; stderrMatched: boolean } {
   const ref = resultRecords(reference),
     js = resultRecords(actual);
@@ -277,11 +322,13 @@ export function matchExpectedDifferences(
       differenceFingerprint(entry.divergence, pairs) !== entry.fingerprints[target]
     )
       continue;
-    // An entry that declares its stderr matches only together with exactly that stderr.
-    const reports = entry.stderrReports?.[target];
+    // An entry that declares its stderr matches only together with such a stderr.
+    const vocabulary = entry.stderrVocabulary?.[target];
     if (
-      reports !== undefined &&
-      (stderr === undefined || stderr.reference !== '' || !stderrOfReports(stderr.actual, reports))
+      vocabulary !== undefined &&
+      (stderr === undefined ||
+        stderr.reference !== '' ||
+        !stderrOfVocabulary(stderr.actual, vocabulary, stderr.root))
     )
       continue;
     matched.push(entry);
@@ -296,6 +343,6 @@ export function matchExpectedDifferences(
         .join('\n'),
     ),
   );
-  const stderrMatched = matched.some((entry) => entry.stderrReports?.[target] !== undefined);
+  const stderrMatched = matched.some((entry) => entry.stderrVocabulary?.[target] !== undefined);
   return { stdout, matched, stderrMatched };
 }
