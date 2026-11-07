@@ -215,6 +215,13 @@ export async function run(
 
   const families = options.families === undefined ? FAMILIES : { ...FAMILIES, ...options.families };
   const { imports, suspends } = buildImports(loaded.module, ctx, families, loaded.stringImports);
+  if (
+    WebAssembly.Module.imports(loaded.module).some(
+      (i) => i.module === 'moonbitlang/async' && i.name.startsWith('socket/'),
+    )
+  ) {
+    host.net.prepare?.();
+  }
 
   const call = async (
     f: (...args: unknown[]) => unknown,

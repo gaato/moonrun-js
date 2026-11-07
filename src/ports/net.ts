@@ -143,6 +143,14 @@ export interface NetPort {
   listen(options: ListenOptions, events: ServerEvents): StreamServer;
   datagram(family: IpFamily, options: DatagramOptions, events: DatagramEvents): DatagramSocket;
   interfaces(): readonly NetInterface[];
+  /**
+   * Pays the host's one-time lazy initialization of its socket code (e.g. Node
+   * compiling its address-validation regexes on first use). The engine calls it before
+   * guest code runs when the guest imports socket functions: native moonrun has no such
+   * cost, and paying it inside the guest's first scheduling turn delays socket setup
+   * against the guest's own timers.
+   */
+  prepare?(): void;
 }
 
 /** `getaddrinfo` failure codes (glibc names; the kernel encodes the numbers). */

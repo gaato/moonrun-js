@@ -365,6 +365,14 @@ function datagramSocket(
 /** `NetPort` over `node:net` and `node:dgram` (also used on Deno and Bun). */
 export function nodeNet(): NetPort {
   return {
+    prepare: () => {
+      // net.connect/listen, dgram and dns.lookup validate every address with these
+      // regexes; V8 compiles them on the first call and again when it tiers them up.
+      for (let i = 0; i < 2; i++) {
+        net.isIP('127.0.0.1');
+        net.isIP('::1');
+      }
+    },
     connect: (options, events) => {
       const socket = new net.Socket({ allowHalfOpen: true });
       wireStream(socket, events);

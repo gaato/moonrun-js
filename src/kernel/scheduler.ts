@@ -29,9 +29,15 @@ interface Channel {
 /** A generous interval: only its existence matters. */
 const KEEP_ALIVE_MS = 1 << 30;
 
+/** `setImmediate` where the host has one (Node, Deno, Bun); typed structurally. */
+const immediate = (globalThis as { setImmediate?: (callback: () => void) => unknown }).setImmediate;
+
 /**
- * The global event loop. Macrotasks use a `MessageChannel`, because `setTimeout(0)` is
- * clamped to 1 ms in Node and the guest yields this way on every `wait(0)`.
+ * The global event loop. The guest yields a macrotask on every `wait(0)`, so a macrotask
+ * must be cheap: `setTimeout(0)` is clamped to 1 ms in Node. Hosts with `setImmediate`
+ * use it. A `MessageChannel` (the browser fallback) builds a `MessageEvent` per message,
+ * and Node loads its web-platform modules on the first one, which used to stall the
+ * guest just as its tests started.
  */
 export class GlobalScheduler implements Scheduler {
   #channel: Channel | undefined;
@@ -64,9 +70,21 @@ export class GlobalScheduler implements Scheduler {
     const { promise, resolve } = Promise.withResolvers<void>();
     this.#pending.push(resolve);
     if (this.#pending.length === 1) {
-      this.#port().port2.postMessage(null);
+      if (immediate === undefined) {
+        this.#port().port2.postMessage(null);
+      } else {
+        immediate(() => this.#run());
+      }
     }
     return promise;
+  }
+
+  #run(): void {
+    const pending = this.#pending;
+    this.#pending = [];
+    for (const resolve of pending) {
+      resolve();
+    }
   }
 
   keepAlive(): Timer {
@@ -92,13 +110,7 @@ export class GlobalScheduler implements Scheduler {
   #port(): Channel {
     if (this.#channel === undefined) {
       const channel: Channel = new MessageChannel() as unknown as Channel;
-      channel.port1.onmessage = () => {
-        const pending = this.#pending;
-        this.#pending = [];
-        for (const resolve of pending) {
-          resolve();
-        }
-      };
+      channel.port1.onmessage = () => this.#run();
       this.#channel = channel;
     }
     return this.#channel;
