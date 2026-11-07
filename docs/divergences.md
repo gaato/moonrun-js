@@ -41,7 +41,7 @@
 | D36 | Deno 2.9.7 の node:net listener は `ipv6Only: true` でも IPv4-mapped 接続を受け入れる。`dual_stack_test.mbt` index 1 が失敗する | 公開 listen API の制約。受け入れ後の切断は connect 時の拒否と異なる。FFI で socket を作り直す経路は設けない |
 | D37 | Bun 1.4.2 の native `wasm:js-string.equals("hello", null)` が 0 でなく trap する | **CLI / bytes 経由では解消**。動作を probe し、equals の import namespace だけを同じ長さの衝突しない内部名に差し替えて JS の equals を使う。GC-array の builtin・関数番号・ソースオフセットは維持する。入力 bytes は変更しない。外部の `WebAssembly.Module` だけを渡す `fromCompiled` では解決済み builtin を上書きできず、この制約が残る |
 | D38 | Deno に `fromCompiled` で外部の `WebAssembly.Module` だけを渡した場合、フレームの runtime location の関数番号が常に 0 のままになる。bytes 経由の `compileBytes` と CLI では、名前付き・匿名ともコード位置から正しい番号に復元する | Module API は code section を取り出せない。関数名は保持するが、新しい上流 renderer が出す runtime location には制約が残る。D1 のハッシュ差は別途残る |
-| D39 | Deno 2.9.7 の ctime は秒単位、mtime / atime は ms 精度。`timestamp_test.mbt` index 0 の「600ms 後の ctime 差が 500ms 超」は秒境界によって失敗する | node:fs と Deno.stat の両方で確認。公開 API にない ns 精度を時刻の推測や libc の statx で補わない。mtime の刻みは watcher の変化検出（D17）にも影響する |
+| D39 | Deno 2.9.7 の ctime は秒単位、mtime / atime は ms 精度。`timestamp_test.mbt` index 0 の「600ms 後の ctime 差が 500ms 超」は秒境界によって失敗する。index 2 は chmod 後の ctime と、上流テストが ctime として読む `file.mtime()`（ms 精度）の差を比べるので、同じく秒の中の位置によって失敗する。1 回の run で片方だけ失敗することもある | node:fs と Deno.stat の両方で確認。公開 API にない ns 精度を時刻の推測や libc の statx で補わない。mtime の刻みは watcher の変化検出（D17）にも影響する |
 | D40 | Deno 2.9.7 の node:dgram は受信した IPv6 link-local peer の scope ID を失う | UDP receive bridge は hostname / port しか返さず、元の sockaddr の sin6_scope_id は復元できない。正しい scope を必要とする reconnect に影響する。送信先やローカルの interface から推測しない。上流の公開 API による scope 保持が必要。現在の multicast discovery テストは先に D33 で失敗するため、D40 を独立した失敗数として重複計上しない |
 
 
@@ -66,6 +66,13 @@ P6 の測定上の注意:
   任意の timing failure を flaky として許したりしていない。
   以下の 546 件・27 invocation の測定は旧互換対象の履歴である。
 
+- 2026-11-07: CI の Deno async は 10-29・11-01・11-02・11-04・11-06 に 16 件失敗した
+  （D16 / D33–D36 の 14 件、D39 index 0、未登録の 1 件）。当時の CI ログは test 名を
+  出さなかったが、16 件の回は必ず D39 index 0 と同時で、index 0 だけの回（15 件）は
+  未登録 0 件だった。index 2 は同じ D39 で失敗し、両者が失敗する秒の中の位置は一部
+  重なる。ローカルの単独実行では Deno だけが index 0 / 2 を各約半数で落とし、Node と
+  native は 0 件。index 2 を別の flaky 項目として登録した。
+
 - D12: `--unordered` は protocol block 同士だけでなく、その中の result / start JSON 行も多重集合として比較する。重複・message は保持する。signal の index 0 / 1 の入れ替わりを許すが、合否や出力を消さない。並行した helper build の `Artifacts:` と `moonbitlang/async_test_programs/*` の完全な出力も、名前・パス・個数を保持して並べる。それ以外の protocol 外の出力は順序も保持する。helper の完了順は runner の相違ではないため。
 - shell の warning の書き手は `src/shell/progs_for_test.mbt` の遅延初期化から並行起動する `moon build test_programs/{cat,sleep,dump_env,filter}`。同じ stderr に parser が warning を複数 write していた。suite は helper を事前 build し、nested moon の出力を子ごとに完全に捕捉してから転送する。warning のフィルタは無い。stdout・stderr・非ゼロ exit の転送を回帰テストで確認し、Node 全 async は **27/27、546/546 を 3 回連続**で観測した。
 - Deno の watcher は inode ごとに共有し、`/proc/self/fd` 経由で監視する。移動時には現在のパスで再登録する（D17）。公開 API の mtime 精度（D39）、通知の合流・遅延、再登録の隙間があるため、単独の fs 50/50 だけでは安定した一致と数えない。FFI 撤去後の全 async 3 回では watcher テストは全成功、ctime だけが 1 回失敗した（D39）。成功テスト数は 540 → 541 → 541 / 546、socket の 5 失敗は各回で同じ。
@@ -85,7 +92,7 @@ Bun の分類（part 1 → part 2）:
 CI の期待差分:
 
 - `scripts/suite.ts` は既定で `test/conformance/expected-differences.json` を読む。`--expected-differences <json>` で別の一覧を指定できる。runtime・suite・target・wasm invocation と test file/index を限定し、ID がこの表にあることを検証する。`-p` の指定時はその package の期待差分だけを検査する。
-- 一覧には Bun core の D3（各 target 39 invocations / 339 test records）、全 runtime の async D16（9 tests）、Deno async の D33–D36（1 invocation / 5 tests）、Bun async の D33（1 test）を登録した。D39 の ctime test だけは `flaky: true` で出ても出なくてもよい。任意の差を flaky にすることは許さない。D17 / D40 と Bun の待機時間検査は期待差分に入れていない。
+- 一覧には Bun core の D3（各 target 39 invocations / 339 test records）、全 runtime の async D16（9 tests）、Deno async の D33–D36（1 invocation / 5 tests）、Bun async の D33（1 test）を登録した。D39 の ctime test 2 件（index 0 / 2、別々の項目）だけは `flaky: true` で出ても出なくてもよい。任意の差を flaky にすることは許さない。D17 / D40 と Bun の待機時間検査は期待差分に入れていない。
 - fingerprint は reference / actual の **両方**の result record を固定する。D3 はフレームの名前・位置だけを除き、フレーム数・エラー文・全ての他のフィールドを保持する（JSC の divide/remainder by zero 等の文言も固定）。D34 は message 内で同一であることを確認した loopback / wildcard の port だけを可変とする。異なる port の組み合わせや別のエラーは一致しない。
 - 一覧と異なる出力・新しい test の差・exit / signal / stderr の差は失敗。必須の期待差分が無くなっても失敗し、解消済みの項目の更新を要求する。既存の D3 stderr / D12 順序の正規化は継続する。列挙した result record 以外の stdout は変更しない。
 - exit 0 は「差が全て登録通り」であり、互換レベル L2 / L3 の達成ではない。raw の一致 invocation 数と `mismatches` を残し、`expected` / `unexpected` / `missingExpected` と実際に一致した divergence ID を別に報告する。

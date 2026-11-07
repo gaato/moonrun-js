@@ -27,6 +27,18 @@
     },
     {
       "suite": "async",
+      "invocation": "moonbitlang/async/fs/fs.blackbox_test.wasm",
+      "divergence": "D39",
+      "tests": {
+        "timestamp_test.mbt": [2]
+      },
+      "fingerprints": {
+        "wasm": "4553b9ad7dca6d7d4b524790ef6edd9d0a77df8bae5785b56522f77d4aec2be4"
+      },
+      "flaky": true
+    },
+    {
+      "suite": "async",
       "invocation": "moonbitlang/async/socket/socket.blackbox_test.wasm",
       "divergence": "D33",
       "tests": {

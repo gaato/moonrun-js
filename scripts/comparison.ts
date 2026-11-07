@@ -81,6 +81,12 @@ function testKeys(entry: ExpectedDifference): string[] {
     .sort();
 }
 
+/**
+ * D39: Deno's ctime has whole seconds, so these comparisons depend on where the run
+ * falls within a second. One entry each: they fail independently of each other.
+ */
+const D39_FLAKY_TESTS = ['{"timestamp_test.mbt":[0]}', '{"timestamp_test.mbt":[2]}'];
+
 export function validateExpectedDifferences(
   list: ExpectedDifferences,
   documentation: string,
@@ -101,9 +107,9 @@ export function validateExpectedDifferences(
           entry.divergence !== 'D39' ||
           entry.suite !== 'async' ||
           entry.invocation !== 'moonbitlang/async/fs/fs.blackbox_test.wasm' ||
-          JSON.stringify(entry.tests) !== '{"timestamp_test.mbt":[0]}')
+          !D39_FLAKY_TESTS.includes(JSON.stringify(entry.tests)))
       )
-        throw new Error('Only the D39 ctime test may be flaky');
+        throw new Error('Only the D39 ctime tests may be flaky');
       const keys = testKeys(entry);
       if (keys.length === 0 || Object.keys(entry.fingerprints).length === 0)
         throw new Error('Expected difference needs tests and target fingerprints');

@@ -181,5 +181,20 @@ describe('expected suite differences', () => {
       flaky: true,
     };
     expect(() => validateExpectedDifferences({ deno: [ctime] }, docs)).not.toThrow();
+    const opened = { ...ctime, tests: { 'timestamp_test.mbt': [2] } };
+    expect(() => validateExpectedDifferences({ deno: [ctime, opened] }, docs)).not.toThrow();
+    // A combined entry would only match when both fail in the same run.
+    expect(() =>
+      validateExpectedDifferences(
+        { deno: [{ ...ctime, tests: { 'timestamp_test.mbt': [0, 2] } }] },
+        docs,
+      ),
+    ).toThrow('Only the D39');
+    expect(() =>
+      validateExpectedDifferences(
+        { deno: [{ ...ctime, tests: { 'timestamp_test.mbt': [1] } }] },
+        docs,
+      ),
+    ).toThrow('Only the D39');
   });
 });
