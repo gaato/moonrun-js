@@ -17,11 +17,11 @@ jobs:
       XDG_CACHE_HOME: ${{ github.workspace }}/.cache/xdg
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.1
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
       - name: Check release tag
         run: |
           version="$(mise exec -- node -p 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
